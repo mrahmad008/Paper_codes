@@ -1,543 +1,627 @@
+# -----------------------------------------------------------------------------
+# SBF convergence versus number of IRS elements - Fig. 6
+#
+# This experiment measures the average number of SBF iterations required to
+# reach different received-SNR targets.
+#
+# Results are generated for M = {4, 32, 128, 512} under both static and
+# time-varying channel conditions. The time-varying case includes the channel
+# drift model used in Section 5.
+#
+# Each result is averaged over 200 independent channel realizations.
+# -----------------------------------------------------------------------------
+
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.special import erfc
-from PIL import Image
-
 
 # ============================================================
-# Parameters
+# FAIR COMBINED FIGURE 5
+# Static vs time-varying SBF target-SNR attainment
+#
+# Fairness rule:
+# For every Monte Carlo realization and every M, the static
+# and time-varying cases use EXACTLY the same:
+#   - initial channel realization
+#   - initial IRS phase vector
+#   - SBF perturbation sequence epsilon_m(k)
+#
+# The time-varying case differs only through channel phase drift:
+#   delta_m(k) ~ U[-pi/25, pi/25]
+#
+# The dynamic SBF discount factor remains lambda = 0.98.
+#
+# Static curves: solid
+# Time-varying curves: dashed
+# Same color/marker for the same M.
+#
+# Saves PNG only.
 # ============================================================
 
-M = 4                          # number of IRS elements
-ETA = 1.0
-THETA = 0.0
-X = 1.0
-VAR = 1.0                      # channel variance (0 dB)
+MASTER_SEED = 42
+master_rng = np.random.default_rng(MASTER_SEED)
 
-# SNR range
-SNR_dB = np.arange(-10, 15, 2)     # -10 to 14 dB
-SNR_lin = 10 ** (SNR_dB / 10)
+K = 100
+NUM_REALIZATIONS = 200
 
-# Number of channel realisations
-N_CH = 5000
+x = 1.0
+beta = 0.0
+eta = 0.8
 
+epsilon_low = -np.pi / 20.0
+epsilon_high = np.pi / 20.0
 
-# ============================================================
-# Codebooks for N = 4, 6, 8
-# ============================================================
+lambda_discount = 0.98
+delta_bound = np.pi / 25.0
 
-codebook_4 = np.array([
-    [0, 0, 0, 0],
-    [0, np.pi, 0, np.pi],
-    [0, 0, np.pi, np.pi],
-    [0, np.pi, np.pi, 0]
-])
+carrier_frequency_GHz = 2.4
 
-codebook_6 = np.array([
-    [0, 0, 0, 0],
-    [0, np.pi, 0, np.pi],
-    [0, 0, np.pi, np.pi],
-    [0, np.pi, np.pi, 0],
-    [0, np.pi/2, 0, np.pi/2],
-    [0, 0, np.pi/2, np.pi/2]
-])
+ambient_source_power_dBm = 20.0
+ambient_noise_power_dBm = -95.0
 
-codebook_8 = np.array([
-    [0, 0, 0, 0],
-    [0, np.pi, 0, np.pi],
-    [0, 0, np.pi, np.pi],
-    [0, np.pi, np.pi, 0],
-    [0, np.pi/2, 0, np.pi/2],
-    [0, 0, np.pi/2, np.pi/2],
-    [0, np.pi/2, np.pi, 3*np.pi/2],
-    [0, 3*np.pi/2, np.pi, np.pi/2]
-])
+rho_dB = ambient_source_power_dBm - ambient_noise_power_dBm
+rho = 10.0 ** (rho_dB / 10.0)
 
-codebooks = {
-    4: codebook_4,
-    6: codebook_6,
-    8: codebook_8
-}
+source_to_receiver_distance_m = 20.0
+source_to_conventional_tag_distance_m = 10.0
+conventional_tag_to_receiver_distance_m = 10.0
+source_to_irs_distance_m = 8.0
+irs_to_receiver_distance_m = 12.0
 
+M_values = [4, 32, 128, 512]
+MAX_M = max(M_values)
+
+target_snr_dB_values = np.arange(5.0, 41.0, 1.0)
 
 # ============================================================
-# Helper functions
+# 3GPP InH path loss
 # ============================================================
 
-def compute_G_all(phi, direct, h_ir, h_si):
-    """
-    Compute received complex channel gain for a batch
-    of phase configurations.
-    """
-
-    irs_sum = np.sum(
-        h_ir
-        * np.exp(1j * phi)
-        * h_si,
-        axis=1
+def indoor_los_path_loss_dB(distance_m, frequency_GHz):
+    return (
+        32.4
+        + 17.3 * np.log10(distance_m)
+        + 20.0 * np.log10(frequency_GHz)
     )
 
-    return direct + ETA * irs_sum
+def indoor_nlos_path_loss_dB(distance_m, frequency_GHz):
+    los = indoor_los_path_loss_dB(distance_m, frequency_GHz)
+    nlos_candidate = (
+        17.30
+        + 38.3 * np.log10(distance_m)
+        + 24.9 * np.log10(frequency_GHz)
+    )
+    return max(los, nlos_candidate)
 
+source_to_receiver_PL_dB = indoor_nlos_path_loss_dB(
+    source_to_receiver_distance_m,
+    carrier_frequency_GHz
+)
 
-def mps_best_phi_batch(
-    h_ir,
-    h_si,
-    direct,
-    codebook
-):
-    """
-    Select the codeword producing the maximum received
-    SNR for each channel realisation.
-    """
+source_to_conventional_tag_PL_dB = indoor_nlos_path_loss_dB(
+    source_to_conventional_tag_distance_m,
+    carrier_frequency_GHz
+)
 
-    N_vec = codebook.shape[0]
+conventional_tag_to_receiver_PL_dB = indoor_nlos_path_loss_dB(
+    conventional_tag_to_receiver_distance_m,
+    carrier_frequency_GHz
+)
 
-    phi_all = codebook[None, :, :]
+source_to_irs_PL_dB = indoor_los_path_loss_dB(
+    source_to_irs_distance_m,
+    carrier_frequency_GHz
+)
 
-    h_ir_exp = h_ir[:, None, :]
+irs_to_receiver_PL_dB = indoor_los_path_loss_dB(
+    irs_to_receiver_distance_m,
+    carrier_frequency_GHz
+)
 
-    h_si_exp = h_si[:, None, :]
+source_to_receiver_variance = 10.0 ** (
+    -source_to_receiver_PL_dB / 10.0
+)
 
-    irs_sum = np.sum(
-        h_ir_exp
-        * np.exp(1j * phi_all)
-        * h_si_exp,
-        axis=2
+source_to_conventional_tag_variance = 10.0 ** (
+    -source_to_conventional_tag_PL_dB / 10.0
+)
+
+conventional_tag_to_receiver_variance = 10.0 ** (
+    -conventional_tag_to_receiver_PL_dB / 10.0
+)
+
+source_to_irs_variance = 10.0 ** (
+    -source_to_irs_PL_dB / 10.0
+)
+
+irs_to_receiver_variance = 10.0 ** (
+    -irs_to_receiver_PL_dB / 10.0
+)
+
+# ============================================================
+# Complex Gaussian helpers
+# ============================================================
+
+def cn_scalar(rng, variance):
+    return np.sqrt(variance / 2.0) * (
+        rng.standard_normal()
+        + 1j * rng.standard_normal()
     )
 
-    G_all = (
-        direct[:, None]
-        + ETA * irs_sum
+def cn_vector(rng, variance, size):
+    return np.sqrt(variance / 2.0) * (
+        rng.standard_normal(size)
+        + 1j * rng.standard_normal(size)
     )
 
-    gamma_all = np.abs(G_all) ** 2
+# ============================================================
+# One common trial shared by all M and both channel cases
+# ============================================================
 
-    best_idx = np.argmax(
-        gamma_all,
-        axis=1
+def generate_common_trial(seed):
+    rng = np.random.default_rng(seed)
+
+    h_sr = cn_scalar(rng, source_to_receiver_variance)
+    h_st = cn_scalar(rng, source_to_conventional_tag_variance)
+    h_tr = cn_scalar(rng, conventional_tag_to_receiver_variance)
+
+    h_si_full = cn_vector(
+        rng,
+        source_to_irs_variance,
+        MAX_M
     )
 
-    return codebook[best_idx, :]
-
-
-def generate_channels(
-    N_ch,
-    M,
-    var
-):
-    """
-    Generate independent Rayleigh fading channels.
-    """
-
-    h_sr = np.sqrt(var / 2) * (
-        np.random.randn(N_ch)
-        + 1j * np.random.randn(N_ch)
+    h_ir_full = cn_vector(
+        rng,
+        irs_to_receiver_variance,
+        MAX_M
     )
 
-    h_st = np.sqrt(var / 2) * (
-        np.random.randn(N_ch)
-        + 1j * np.random.randn(N_ch)
+    phi0_full = rng.uniform(
+        -np.pi,
+        np.pi,
+        MAX_M
     )
 
-    h_tr = np.sqrt(var / 2) * (
-        np.random.randn(N_ch)
-        + 1j * np.random.randn(N_ch)
+    epsilon_full = rng.uniform(
+        epsilon_low,
+        epsilon_high,
+        size=(K - 1, MAX_M)
     )
 
-    h_si = np.sqrt(var / 2) * (
-        np.random.randn(N_ch, M)
-        + 1j * np.random.randn(N_ch, M)
+    drift_unit_full = rng.uniform(
+        -1.0,
+        1.0,
+        size=(K - 1, MAX_M)
     )
 
-    h_ir = np.sqrt(var / 2) * (
-        np.random.randn(N_ch, M)
-        + 1j * np.random.randn(N_ch, M)
-    )
-
-    direct = (
+    C = (
         h_sr
         + h_st
-        * X
-        * np.exp(1j * THETA)
+        * x
+        * np.exp(1j * beta)
         * h_tr
     )
 
-    return direct, h_ir, h_si
-
+    return {
+        "C": C,
+        "h_si_full": h_si_full,
+        "h_ir_full": h_ir_full,
+        "phi0_full": phi0_full,
+        "epsilon_full": epsilon_full,
+        "drift_unit_full": drift_unit_full,
+    }
 
 # ============================================================
-# Generate channels once
+# Static SBF
 # ============================================================
 
-print("Generating channels ...")
+def static_sbf_history_from_common(trial, M):
+    C = trial["C"]
 
-direct, h_ir, h_si = generate_channels(
-    N_CH,
-    M,
-    VAR
+    h_si = trial["h_si_full"][:M]
+    h_ir = trial["h_ir_full"][:M]
+
+    phi_best = trial["phi0_full"][:M].copy()
+    epsilon_seq = trial["epsilon_full"][:, :M]
+
+    gamma_history_linear = np.zeros(K)
+
+    irs_sum = np.sum(
+        h_ir
+        * np.exp(1j * phi_best)
+        * h_si
+    )
+
+    G = C + eta * irs_sum * x
+
+    gamma_best = rho * np.abs(G) ** 2
+    gamma_history_linear[0] = gamma_best
+
+    for k in range(1, K):
+
+        phi_trial = (
+            phi_best
+            + epsilon_seq[k - 1]
+        )
+
+        irs_sum_trial = np.sum(
+            h_ir
+            * np.exp(1j * phi_trial)
+            * h_si
+        )
+
+        G_trial = C + eta * irs_sum_trial * x
+
+        gamma_trial = rho * np.abs(G_trial) ** 2
+
+        if gamma_trial > gamma_best:
+            phi_best = phi_trial
+            gamma_best = gamma_trial
+
+        gamma_history_linear[k] = gamma_best
+
+    return 10.0 * np.log10(
+        np.maximum(
+            gamma_history_linear,
+            1e-30
+        )
+    )
+
+# ============================================================
+# Time-varying SBF
+# Same channel / phi0 / epsilon as static; drift only
+# ============================================================
+
+def dynamic_sbf_history_from_common(trial, M):
+    C = trial["C"]
+
+    h_si = trial["h_si_full"][:M]
+    h_ir = trial["h_ir_full"][:M]
+
+    phi_best = trial["phi0_full"][:M].copy()
+
+    epsilon_seq = trial[
+        "epsilon_full"
+    ][:, :M]
+
+    drift_unit_seq = trial[
+        "drift_unit_full"
+    ][:, :M]
+
+    cascaded_channel = (
+        h_ir
+        * h_si
+    )
+
+    cascaded_magnitude = np.abs(
+        cascaded_channel
+    )
+
+    channel_phase = np.angle(
+        cascaded_channel
+    )
+
+    gamma_history_linear = np.zeros(K)
+
+    current_cascaded = (
+        cascaded_magnitude
+        * np.exp(1j * channel_phase)
+    )
+
+    irs_sum = np.sum(
+        current_cascaded
+        * np.exp(1j * phi_best)
+    )
+
+    G = C + eta * irs_sum * x
+
+    gamma_best = rho * np.abs(G) ** 2
+    gamma_history_linear[0] = gamma_best
+
+    for k in range(1, K):
+
+        # Same perturbation as static case
+        phi_trial = (
+            phi_best
+            + epsilon_seq[k - 1]
+        )
+
+        # Channel drift only
+        delta = (
+            delta_bound
+            * drift_unit_seq[k - 1]
+        )
+
+        channel_phase = (
+            channel_phase
+            + delta
+        )
+
+        current_cascaded = (
+            cascaded_magnitude
+            * np.exp(1j * channel_phase)
+        )
+
+        irs_sum_trial = np.sum(
+            current_cascaded
+            * np.exp(1j * phi_trial)
+        )
+
+        G_trial = (
+            C
+            + eta
+            * irs_sum_trial
+            * x
+        )
+
+        gamma_trial = (
+            rho
+            * np.abs(G_trial) ** 2
+        )
+
+        if gamma_trial > gamma_best:
+            phi_best = phi_trial
+            gamma_best = gamma_trial
+        else:
+            gamma_best = (
+                lambda_discount
+                * gamma_best
+            )
+
+        gamma_history_linear[k] = gamma_best
+
+    return 10.0 * np.log10(
+        np.maximum(
+            gamma_history_linear,
+            1e-30
+        )
+    )
+
+# ============================================================
+# First-passage iteration
+# ============================================================
+
+def first_iteration_to_reach_target(
+    gamma_history_dB,
+    target_dB
+):
+    reached = np.where(
+        gamma_history_dB >= target_dB
+    )[0]
+
+    if reached.size == 0:
+        return K
+
+    return int(reached[0])
+
+# ============================================================
+# Paired Monte Carlo averaging
+# ============================================================
+
+static_counts = {
+    M: np.zeros(
+        (
+            NUM_REALIZATIONS,
+            len(target_snr_dB_values)
+        )
+    )
+    for M in M_values
+}
+
+dynamic_counts = {
+    M: np.zeros(
+        (
+            NUM_REALIZATIONS,
+            len(target_snr_dB_values)
+        )
+    )
+    for M in M_values
+}
+
+trial_seeds = master_rng.integers(
+    0,
+    2**32 - 1,
+    size=NUM_REALIZATIONS,
+    dtype=np.uint32
 )
 
+for realization_index, seed in enumerate(
+    trial_seeds
+):
 
-# ============================================================
-# Compute BER for each codebook size
-# ============================================================
-
-BER_results = {}
-
-
-for N in [4, 6, 8]:
-
-    print(
-        f"Computing gains for N = {N} ..."
+    trial = generate_common_trial(
+        int(seed)
     )
 
-    # Select best MPS phase vector
-    phi_mps = mps_best_phi_batch(
-        h_ir,
-        h_si,
-        direct,
-        codebooks[N]
-    )
+    for M in M_values:
 
-    # Compute received channel gain
-    G_mps = compute_G_all(
-        phi_mps,
-        direct,
-        h_ir,
-        h_si
-    )
-
-    # Received channel power
-    gamma_mps = np.abs(G_mps) ** 2
-
-
-    # --------------------------------------------------------
-    # BER calculation
-    # --------------------------------------------------------
-
-    BER = np.zeros(
-        len(SNR_lin)
-    )
-
-    for i, snr in enumerate(SNR_lin):
-
-        BER[i] = np.mean(
-            0.5
-            * erfc(
-                np.sqrt(
-                    snr * gamma_mps
-                )
+        static_history_dB = (
+            static_sbf_history_from_common(
+                trial,
+                M
             )
         )
 
-    BER_results[N] = BER
+        dynamic_history_dB = (
+            dynamic_sbf_history_from_common(
+                trial,
+                M
+            )
+        )
 
+        for target_index, target_dB in enumerate(
+            target_snr_dB_values
+        ):
 
-# ============================================================
-# Manual scaling to create clear gaps
-#
-# NOTE:
-# These factors are retained exactly from your original code.
-# ============================================================
+            static_counts[M][
+                realization_index,
+                target_index
+            ] = first_iteration_to_reach_target(
+                static_history_dB,
+                target_dB
+            )
 
-scale_N6 = 0.5
-scale_N8 = 0.2
+            dynamic_counts[M][
+                realization_index,
+                target_index
+            ] = first_iteration_to_reach_target(
+                dynamic_history_dB,
+                target_dB
+            )
 
-
-BER_scaled = {
-
-    4: BER_results[4],
-
-    6: BER_results[6]
-       * scale_N6,
-
-    8: BER_results[8]
-       * scale_N8
+static_curves = {
+    M: static_counts[M].mean(axis=0)
+    for M in M_values
 }
 
+dynamic_curves = {
+    M: dynamic_counts[M].mean(axis=0)
+    for M in M_values
+}
 
 # ============================================================
-# Publication-quality plotting parameters
+# USER-EDITABLE PLOT SETTINGS
 # ============================================================
 
-plt.rcParams.update({
+X_LABEL = r"Target Received SNR $\gamma$ (dB)"
+Y_LABEL = "Average Number of Iterations"
 
-    # Font
-    'font.family': 'Arial',
+GRID_ON = True
+GRID_STYLE = "--"
+GRID_ALPHA = 0.35
+GRID_WIDTH = 0.6
 
-    # General font size
-    'font.size': 10,
+X_TICK_STEP = 5
+Y_TICK_STEP = 10
 
-    # Axis labels
-    'axes.labelsize': 11,
+LINE_WIDTH = 2.0
+MARKER_SIZE = 5
+MARK_EVERY = 3
 
-    # Tick labels
-    'xtick.labelsize': 9,
-    'ytick.labelsize': 9,
+CURVE_COLORS = {
+    4: "red",
+    32: "black",
+    128: "blue",
+    512: "green",
+}
 
-    # Legend
-    'legend.fontsize': 9,
+CURVE_MARKERS = {
+    4: "^",
+    32: "D",
+    128: "o",
+    512: "s",
+}
 
-    # Axis line width
-    'axes.linewidth': 0.8,
+STATIC_LINESTYLE = "-"
+DYNAMIC_LINESTYLE = ":"
 
-    # Tick widths
-    'xtick.major.width': 0.8,
-    'ytick.major.width': 0.8,
-
-    # Tick lengths
-    'xtick.major.size': 4,
-    'ytick.major.size': 4
-})
-
+OUTPUT_FILE_NAME = (
+    "figure5_static_vs_time_varying_paired.png"
+)
 
 # ============================================================
-# Create figure
+# Plot
 # ============================================================
 
 fig, ax = plt.subplots(
-    figsize=(8, 6)
+    figsize=(9, 6)
 )
 
+for M in M_values:
 
-# ============================================================
-# Original color and marker scheme
-#
-# N = 4 -> RED + TRIANGLE
-# N = 6 -> BLUE + SQUARE
-# N = 8 -> GREEN + CIRCLE
-# ============================================================
-
-style_map = {
-
-    4: {
-        'color': 'red',
-        'marker': '^',
-        'label': 'N = 4'
-    },
-
-    6: {
-        'color': 'blue',
-        'marker': 's',
-        'label': 'N = 6'
-    },
-
-    8: {
-        'color': 'green',
-        'marker': 'o',
-        'label': 'N = 8'
-    }
-}
-
-
-# ============================================================
-# Plot BER curves
-# ============================================================
-
-for N in [4, 6, 8]:
-
-    style = style_map[N]
-
-    ax.semilogy(
-        SNR_dB,
-        BER_scaled[N],
-
-        # Preserve original colors
-        color=style['color'],
-
-        # Preserve original markers
-        marker=style['marker'],
-
-        # Preserve original line width
-        linewidth=2.5,
-
-        # Preserve original marker size
-        markersize=8,
-
-        # Marker at every point
-        markevery=1,
-
-        # Legend
-        label=style['label']
+    ax.plot(
+        target_snr_dB_values,
+        static_curves[M],
+        color=CURVE_COLORS[M],
+        marker=CURVE_MARKERS[M],
+        linewidth=LINE_WIDTH,
+        markersize=MARKER_SIZE,
+        markevery=MARK_EVERY,
+        linestyle=STATIC_LINESTYLE,
+        label=rf"$M={M}$ static channel (SBF-based algorithm)"
     )
 
+for M in M_values:
 
-# ============================================================
-# Axis labels
-# ============================================================
+    ax.plot(
+        target_snr_dB_values,
+        dynamic_curves[M],
+        color=CURVE_COLORS[M],
+        marker=CURVE_MARKERS[M],
+        linewidth=LINE_WIDTH,
+        markersize=MARKER_SIZE,
+        markevery=MARK_EVERY,
+        linestyle=DYNAMIC_LINESTYLE,
+        label=rf"$M={M}$ time-varying channel (SBF-based algorithm)"
+    )
 
-ax.set_xlabel(
-    r'Average Transmit SNR $\rho$ (dB)',
-    fontsize=11,
-    fontweight='normal'
+ax.set_xlabel(X_LABEL)
+ax.set_ylabel(Y_LABEL)
+
+ax.grid(
+    GRID_ON,
+    which="major",
+    linestyle=GRID_STYLE,
+    linewidth=GRID_WIDTH,
+    alpha=GRID_ALPHA
 )
 
-ax.set_ylabel(
-    'Bit Error Rate (BER)',
-    fontsize=11,
-    fontweight='normal'
+ax.set_xticks(
+    np.arange(
+        target_snr_dB_values.min(),
+        target_snr_dB_values.max() + 1,
+        X_TICK_STEP
+    )
 )
 
-
-# ============================================================
-# Axis limits
-# ============================================================
+ax.set_yticks(
+    np.arange(
+        0,
+        K + 1,
+        Y_TICK_STEP
+    )
+)
 
 ax.set_ylim(
-    1e-6,
-    1
+    0,
+    K
 )
 
-ax.set_xlim(
-    -11,
-    16
-)
-
-
-# ============================================================
-# Major and minor ticks
-# ============================================================
-
-ax.minorticks_on()
-
-ax.tick_params(
-    axis='both',
-    which='major',
-    direction='in',
-    length=4,
-    width=0.8
-)
-
-ax.tick_params(
-    axis='both',
-    which='minor',
-    direction='in',
-    length=2.5,
-    width=0.6
-)
-
-
-# ============================================================
-# Grid
-# ============================================================
-
-# Major grid
-ax.grid(
-    True,
-    which='major',
-    linestyle='--',
-    linewidth=0.7,
-    alpha=0.6
-)
-
-# Minor grid
-ax.grid(
-    True,
-    which='minor',
-    linestyle=':',
-    linewidth=0.5,
-    alpha=0.4
-)
-
-
-# ============================================================
-# Legend
-# ============================================================
-
-legend = ax.legend(
-    fontsize=10,
-    loc='upper right',
+ax.legend(
+    loc="best",
     frameon=True,
-    fancybox=False,
-    edgecolor='black',
+    edgecolor="black",
     framealpha=1.0,
-    borderpad=0.5,
-    handlelength=2.5
+    fontsize=9,
+    ncol=2
 )
 
-legend.get_frame().set_facecolor(
-    'white'
+fig.tight_layout()
+
+output_dir = (
+    Path.cwd()
+    / "figure5_combined_paired_fair"
 )
 
-legend.get_frame().set_alpha(
-    1.0
+output_dir.mkdir(
+    parents=True,
+    exist_ok=True
 )
 
-
-# ============================================================
-# Layout
-# ============================================================
-
-fig.tight_layout(
-    pad=0.8
-)
-
-
-# ============================================================
-# Save high-resolution PNG
-# ============================================================
-
-output_file = (
-    'mps_ber_N4_6_8_gap.png'
+save_path = (
+    output_dir
+    / OUTPUT_FILE_NAME
 )
 
 fig.savefig(
-    output_file,
-
-    # High resolution
+    save_path,
     dpi=600,
-
-    # PNG format
-    format='png',
-
-    # Prevent clipping
-    bbox_inches='tight',
-
-    # Small padding
-    pad_inches=0.05,
-
-    # White background
-    facecolor='white',
-
-    # White edge
-    edgecolor='white'
+    bbox_inches="tight",
+    facecolor="white"
 )
-
-
-# ============================================================
-# Verify PNG properties
-# ============================================================
-
-img = Image.open(
-    output_file
-)
-
-print()
-print("============================================")
-print("Figure successfully saved")
-print("============================================")
-print(
-    f"File       : {output_file}"
-)
-print(
-    f"Format     : {img.format}"
-)
-print(
-    f"Image size : {img.size}"
-)
-print(
-    f"Color mode : {img.mode}"
-)
-print(
-    f"Resolution : "
-    f"{img.info.get('dpi', 'Not stored')}"
-)
-print("============================================")
-
-
-# ============================================================
-# Display figure
-# ============================================================
 
 plt.show()
+
+print("PNG saved to:")
+print(save_path)
