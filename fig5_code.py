@@ -1,618 +1,700 @@
+# -----------------------------------------------------------------------------
+# SBF tracking under time-varying channels - Fig. 5
+#
+# This script evaluates the SBF algorithm when the channel changes between
+# successive iterations. The simulations examine the effects of channel drift,
+# IRS phase-setting error, feedback delay, and reflection coefficient.
+#
+# Unless a parameter is being varied, the simulation uses M = 128,
+# epsilon_max = pi/20, delta_max = pi/25, and lambda = 0.98.
+#
+# The plotted results are averaged over 200 independent channel realizations.
+# The channel-drift model is also related to an equivalent mobility level using
+# the Doppler relation described in the manuscript.
+# -----------------------------------------------------------------------------
+
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
-from PIL import Image
-
 
 # ============================================================
-# Simulation parameters
+# FIGURE 4 — DYNAMIC SBF ROBUSTNESS STUDY
+# Latest 2.4 GHz indoor physically grounded baseline
+#
+# PNG-only version
+#
+# Four separate studies now combined into ONE 2x2 figure:
+#   Fig. 4(a): channel drift
+#   Fig. 4(b): time-varying phase error
+#   Fig. 4(c): feedback delay
+#   Fig. 4(d): reflection magnitude / hardware loss
 # ============================================================
 
-M_values = [64, 128, 256]          # number of IRS elements
-NUM_TRIALS = 200                   # channel realisations per M
-K_MAX = 100                        # max iterations (cap)
-RHO = 1.0                          # transmit SNR scale
-ETA = 1.0                          # IRS reflection coefficient
-THETA = 0.0                        # tag phase
-X = 1.0                            # backscattered symbol
-VAR = 1.0                          # channel variance (0 dB)
+MASTER_SEED = 42
+master_rng = np.random.default_rng(MASTER_SEED)
 
-# Perturbation distribution: uniform [-pi/20, pi/20]
-EPS_LOW = -np.pi / 20
-EPS_HIGH = np.pi / 20
+# -----------------------------
+# Manuscript / Algorithm-2 settings
+# -----------------------------
+M = 128
+K = 100
 
+x = 1.0
+beta = 0.0
 
-# ============================================================
-# Helper functions
-# ============================================================
+lambda_discount = 0.98
 
-def compute_max_snr(direct, h_ir, h_si, eta, rho):
-    """
-    Theoretical maximum SNR with perfect IRS alignment.
-    """
+epsilon_low = -np.pi / 20.0
+epsilon_high = np.pi / 20.0
 
-    ir_mags = np.abs(h_ir * h_si)
+NUM_REALIZATIONS = 200
 
-    max_sum = np.sum(ir_mags)
+# -----------------------------
+# Latest indoor physical parameters
+# -----------------------------
+carrier_frequency_GHz = 2.4
+carrier_frequency_Hz = carrier_frequency_GHz * 1e9
 
-    max_total = (
-        np.abs(direct)
-        + eta * max_sum
+ambient_source_power_dBm = 20.0
+ambient_noise_power_dBm = -95.0
+
+# Manuscript definition:
+# rho is average transmit SNR.
+rho_dB = ambient_source_power_dBm - ambient_noise_power_dBm
+rho = 10.0 ** (rho_dB / 10.0)
+
+# Distances
+source_to_receiver_distance_m = 20.0
+source_to_conventional_tag_distance_m = 10.0
+conventional_tag_to_receiver_distance_m = 10.0
+source_to_irs_distance_m = 8.0
+irs_to_receiver_distance_m = 12.0
+
+# -----------------------------
+# 3GPP TR 38.901 InH path loss
+# -----------------------------
+def indoor_los_path_loss_dB(distance_m, frequency_GHz):
+    return (
+        32.4
+        + 17.3 * np.log10(distance_m)
+        + 20.0 * np.log10(frequency_GHz)
     )
 
-    return rho * (max_total ** 2)
+def indoor_nlos_path_loss_dB(distance_m, frequency_GHz):
+    los = indoor_los_path_loss_dB(distance_m, frequency_GHz)
+    nlos_candidate = (
+        17.30
+        + 38.3 * np.log10(distance_m)
+        + 24.9 * np.log10(frequency_GHz)
+    )
+    return max(los, nlos_candidate)
 
+source_to_receiver_PL_dB = indoor_nlos_path_loss_dB(
+    source_to_receiver_distance_m,
+    carrier_frequency_GHz
+)
 
-# ============================================================
-# Run one SBF instance
-# ============================================================
+source_to_conventional_tag_PL_dB = indoor_nlos_path_loss_dB(
+    source_to_conventional_tag_distance_m,
+    carrier_frequency_GHz
+)
 
-def run_sbf_static(
-    M,
-    target_lin,
-    direct,
-    h_ir,
-    h_si
-):
-    """
-    Runs one SBF instance.
+conventional_tag_to_receiver_PL_dB = indoor_nlos_path_loss_dB(
+    conventional_tag_to_receiver_distance_m,
+    carrier_frequency_GHz
+)
 
-    Returns the iteration index (0-based)
-    when SNR >= target_lin.
+source_to_irs_PL_dB = indoor_los_path_loss_dB(
+    source_to_irs_distance_m,
+    carrier_frequency_GHz
+)
 
-    Returns K_MAX if the target is not reached.
-    """
+irs_to_receiver_PL_dB = indoor_los_path_loss_dB(
+    irs_to_receiver_distance_m,
+    carrier_frequency_GHz
+)
 
-    # Random initial IRS phases
-    phi_best = np.random.uniform(
-        0,
-        2 * np.pi,
+source_to_receiver_variance = 10.0 ** (-source_to_receiver_PL_dB / 10.0)
+source_to_conventional_tag_variance = 10.0 ** (-source_to_conventional_tag_PL_dB / 10.0)
+conventional_tag_to_receiver_variance = 10.0 ** (-conventional_tag_to_receiver_PL_dB / 10.0)
+source_to_irs_variance = 10.0 ** (-source_to_irs_PL_dB / 10.0)
+irs_to_receiver_variance = 10.0 ** (-irs_to_receiver_PL_dB / 10.0)
+
+# -----------------------------
+# Mobility for feedback-delay aging
+# -----------------------------
+speed_of_light = 3.0e8
+velocity_m_per_s = 2.0
+
+wavelength_m = speed_of_light / carrier_frequency_Hz
+doppler_frequency_Hz = velocity_m_per_s / wavelength_m
+
+# ------------------------------------------------------------
+# Equivalent-speed interpretation for channel-drift legend
+# ------------------------------------------------------------
+T_update_seconds = 1.0e-3
+
+def equivalent_speed_from_delta(delta_max_rad, wavelength_m, T_update_seconds):
+    return (
+        delta_max_rad * wavelength_m
+        / (2.0 * np.pi * T_update_seconds)
+    )
+
+# -----------------------------
+# Sweep definitions
+# -----------------------------
+channel_drift_bounds = [
+    np.pi / 50.0,
+    np.pi / 25.0,
+    3.0 * np.pi / 50.0,
+    2.0 * np.pi / 25.0,
+]
+
+channel_drift_speed_mps = [
+    equivalent_speed_from_delta(
+        bound,
+        wavelength_m,
+        T_update_seconds
+    )
+    for bound in channel_drift_bounds
+]
+
+phase_error_bounds = [
+    np.deg2rad(0.0),
+    np.deg2rad(5.0),
+    np.deg2rad(10.0),
+    np.deg2rad(20.0),
+]
+
+feedback_delays_s = [
+    0.0,
+    1.0e-3,
+    3.0e-3,
+    5.0e-3,
+]
+
+reflection_magnitude_values = [
+    1.0,
+    0.9,
+    0.8,
+    0.7,
+]
+
+# -----------------------------
+# CSCG generators
+# -----------------------------
+def cn_scalar(rng, variance):
+    return np.sqrt(variance / 2.0) * (
+        rng.standard_normal()
+        + 1j * rng.standard_normal()
+    )
+
+def cn_vector(rng, variance, size):
+    return np.sqrt(variance / 2.0) * (
+        rng.standard_normal(size)
+        + 1j * rng.standard_normal(size)
+    )
+
+# -----------------------------
+# One Monte Carlo trial
+# -----------------------------
+def generate_trial_inputs(seed):
+    rng = np.random.default_rng(seed)
+
+    source_to_receiver_channel = cn_scalar(
+        rng,
+        source_to_receiver_variance
+    )
+
+    source_to_conventional_tag_channel = cn_scalar(
+        rng,
+        source_to_conventional_tag_variance
+    )
+
+    conventional_tag_to_receiver_channel = cn_scalar(
+        rng,
+        conventional_tag_to_receiver_variance
+    )
+
+    source_to_irs_channel = cn_vector(
+        rng,
+        source_to_irs_variance,
         M
     )
 
-    # Initial IRS contribution
-    sum_irs = np.sum(
-        h_ir
-        * np.exp(1j * phi_best)
-        * h_si
+    irs_to_receiver_channel = cn_vector(
+        rng,
+        irs_to_receiver_variance,
+        M
     )
 
-    # Initial received SNR
-    gamma = (
-        RHO
-        * np.abs(
-            direct + ETA * sum_irs
-        ) ** 2
+    C = (
+        source_to_receiver_channel
+        + source_to_conventional_tag_channel
+        * x
+        * np.exp(1j * beta)
+        * conventional_tag_to_receiver_channel
     )
 
-    gamma_best = gamma
+    initial_cascaded_channel = (
+        irs_to_receiver_channel
+        * source_to_irs_channel
+    )
 
+    cascaded_magnitude = np.abs(
+        initial_cascaded_channel
+    )
 
-    # Check whether target is already achieved
-    if gamma_best >= target_lin:
-        return 0
+    channel_phase_initial = np.angle(
+        initial_cascaded_channel
+    )
 
+    initial_irs_phases = rng.uniform(
+        -np.pi,
+        np.pi,
+        M
+    )
 
-    # ========================================================
-    # SBF iterations
-    # ========================================================
+    epsilon_sequence = rng.uniform(
+        epsilon_low,
+        epsilon_high,
+        size=(K - 1, M)
+    )
 
-    for k in range(1, K_MAX + 1):
+    channel_drift_unit_sequence = rng.uniform(
+        -1.0,
+        1.0,
+        size=(K - 1, M)
+    )
 
-        # Random phase perturbation
-        eps = np.random.uniform(
-            EPS_LOW,
-            EPS_HIGH,
-            M
-        )
+    feedback_delay_unit_sequence = rng.uniform(
+        -1.0,
+        1.0,
+        size=(K - 1, M)
+    )
 
-        # New IRS phase configuration
-        phi_new = phi_best + eps
+    phase_error_unit_sequence = rng.uniform(
+        -1.0,
+        1.0,
+        size=(K, M)
+    )
 
-        # New IRS contribution
-        sum_irs_new = np.sum(
-            h_ir
-            * np.exp(1j * phi_new)
-            * h_si
-        )
+    return {
+        "C": C,
+        "cascaded_magnitude": cascaded_magnitude,
+        "channel_phase_initial": channel_phase_initial,
+        "initial_irs_phases": initial_irs_phases,
+        "epsilon_sequence": epsilon_sequence,
+        "channel_drift_unit_sequence": channel_drift_unit_sequence,
+        "feedback_delay_unit_sequence": feedback_delay_unit_sequence,
+        "phase_error_unit_sequence": phase_error_unit_sequence,
+    }
 
-        # New received SNR
-        gamma_new = (
-            RHO
-            * np.abs(
-                direct
-                + ETA * sum_irs_new
-            ) ** 2
-        )
-
-
-        # Accept only an improved solution
-        if gamma_new > gamma_best:
-
-            phi_best = phi_new
-
-            gamma_best = gamma_new
-
-
-            # Check whether target has been reached
-            if gamma_best >= target_lin:
-                return k
-
-
-    return K_MAX
-
-
-# ============================================================
-# Simulation for one M
-# ============================================================
-
-def simulate_for_M(
-    M,
-    target_dB_list
+# -----------------------------
+# Dynamic SBF for one case
+# -----------------------------
+def simulate_dynamic_case(
+    inputs,
+    channel_drift_bound,
+    phase_error_bound=0.0,
+    feedback_delay_s=0.0,
+    reflection_magnitude=0.8,
 ):
-    """
-    Returns average iterations for each
-    target SNR value.
-    """
+    C = inputs["C"]
 
-    avg_iters = []
+    cascaded_magnitude = inputs["cascaded_magnitude"]
+    channel_phase = inputs["channel_phase_initial"].copy()
+    phi_best = inputs["initial_irs_phases"].copy()
 
-    # Convert dB targets to linear scale
-    target_lin_list = [
-        10 ** (dB / 10)
-        for dB in target_dB_list
+    epsilon_sequence = inputs["epsilon_sequence"]
+    channel_drift_unit_sequence = inputs["channel_drift_unit_sequence"]
+    feedback_delay_unit_sequence = inputs["feedback_delay_unit_sequence"]
+    phase_error_unit_sequence = inputs["phase_error_unit_sequence"]
+
+    feedback_delay_phase_bound = (
+        2.0
+        * np.pi
+        * doppler_frequency_Hz
+        * feedback_delay_s
+    )
+
+    e0 = phase_error_bound * phase_error_unit_sequence[0]
+
+    current_cascaded_channel = (
+        cascaded_magnitude
+        * np.exp(1j * channel_phase)
+    )
+
+    G_initial = (
+        C
+        + reflection_magnitude
+        * np.sum(
+            current_cascaded_channel
+            * np.exp(1j * (phi_best + e0))
+        )
+        * x
+    )
+
+    gamma_best = rho * np.abs(G_initial) ** 2
+
+    gamma_history = np.zeros(K)
+    gamma_history[0] = gamma_best
+
+    for k in range(1, K):
+        epsilon = epsilon_sequence[k - 1]
+        phi_trial = phi_best + epsilon
+
+        delta = (
+            channel_drift_bound
+            * channel_drift_unit_sequence[k - 1]
+        )
+        channel_phase = channel_phase + delta
+
+        delay_phase = (
+            feedback_delay_phase_bound
+            * feedback_delay_unit_sequence[k - 1]
+        )
+        channel_phase = channel_phase + delay_phase
+
+        current_cascaded_channel = (
+            cascaded_magnitude
+            * np.exp(1j * channel_phase)
+        )
+
+        phase_error = (
+            phase_error_bound
+            * phase_error_unit_sequence[k]
+        )
+
+        phi_applied = phi_trial + phase_error
+
+        G_trial = (
+            C
+            + reflection_magnitude
+            * np.sum(
+                current_cascaded_channel
+                * np.exp(1j * phi_applied)
+            )
+            * x
+        )
+
+        gamma_trial = rho * np.abs(G_trial) ** 2
+
+        if gamma_trial > gamma_best:
+            phi_best = phi_trial
+            gamma_best = gamma_trial
+        else:
+            gamma_best = lambda_discount * gamma_best
+
+        gamma_history[k] = gamma_best
+
+    return gamma_history
+
+# -----------------------------
+# Common Monte Carlo seeds
+# -----------------------------
+trial_seeds = master_rng.integers(
+    0,
+    2**32 - 1,
+    size=NUM_REALIZATIONS,
+    dtype=np.uint32
+)
+
+def average_family(case_values, family_name):
+    averaged_curves = [
+        np.zeros(K)
+        for _ in case_values
     ]
 
+    for seed in trial_seeds:
+        inputs = generate_trial_inputs(int(seed))
 
-    # ========================================================
-    # Loop over target SNR values
-    # ========================================================
+        for index, case in enumerate(case_values):
+            if family_name == "channel_drift":
+                curve = simulate_dynamic_case(
+                    inputs,
+                    channel_drift_bound=case,
+                    phase_error_bound=0.0,
+                    feedback_delay_s=0.0,
+                    reflection_magnitude=0.8
+                )
 
-    for target_lin in target_lin_list:
+            elif family_name == "phase_error":
+                curve = simulate_dynamic_case(
+                    inputs,
+                    channel_drift_bound=np.pi / 25.0,
+                    phase_error_bound=case,
+                    feedback_delay_s=0.0,
+                    reflection_magnitude=0.8
+                )
 
-        iters_all = []
+            elif family_name == "feedback_delay":
+                curve = simulate_dynamic_case(
+                    inputs,
+                    channel_drift_bound=np.pi / 25.0,
+                    phase_error_bound=0.0,
+                    feedback_delay_s=case,
+                    reflection_magnitude=0.8
+                )
 
+            elif family_name == "reflection_magnitude":
+                curve = simulate_dynamic_case(
+                    inputs,
+                    channel_drift_bound=np.pi / 25.0,
+                    phase_error_bound=0.0,
+                    feedback_delay_s=0.0,
+                    reflection_magnitude=case
+                )
 
-        # ====================================================
-        # Independent channel realisations
-        # ====================================================
+            else:
+                raise ValueError("Unknown family name.")
 
-        for _ in range(NUM_TRIALS):
+            averaged_curves[index] += curve
 
-            # Generate random channels
+    return [
+        curve / NUM_REALIZATIONS
+        for curve in averaged_curves
+    ]
 
-            h_sr = np.sqrt(VAR / 2) * (
-                np.random.randn()
-                + 1j * np.random.randn()
-            )
-
-            h_st = np.sqrt(VAR / 2) * (
-                np.random.randn()
-                + 1j * np.random.randn()
-            )
-
-            h_tr = np.sqrt(VAR / 2) * (
-                np.random.randn()
-                + 1j * np.random.randn()
-            )
-
-            h_si = np.sqrt(VAR / 2) * (
-                np.random.randn(M)
-                + 1j * np.random.randn(M)
-            )
-
-            h_ir = np.sqrt(VAR / 2) * (
-                np.random.randn(M)
-                + 1j * np.random.randn(M)
-            )
-
-
-            # Direct path + tag contribution
-
-            direct = (
-                h_sr
-                + h_st
-                * X
-                * np.exp(1j * THETA)
-                * h_tr
-            )
-
-
-            # =================================================
-            # Maximum theoretically achievable SNR
-            # =================================================
-
-            max_snr = compute_max_snr(
-                direct,
-                h_ir,
-                h_si,
-                ETA,
-                RHO
-            )
-
-
-            # Target cannot be achieved
-            if max_snr < target_lin:
-                continue
-
-
-            # =================================================
-            # Run SBF
-            # =================================================
-
-            iters = run_sbf_static(
-                M,
-                target_lin,
-                direct,
-                h_ir,
-                h_si
-            )
-
-
-            # Only count successful trials
-            if iters < K_MAX:
-                iters_all.append(iters)
-
-
-        # ====================================================
-        # Average iterations
-        # ====================================================
-
-        if iters_all:
-
-            avg_iters.append(
-                np.mean(iters_all)
-            )
-
-        else:
-
-            avg_iters.append(
-                np.nan
-            )
-
-
-    return avg_iters
-
-
-# ============================================================
-# Main execution
-# ============================================================
-
-# Target SNR values from 0 to 25 dB
-target_dB = np.arange(
-    0,
-    26,
-    1
+channel_drift_avg = average_family(
+    channel_drift_bounds,
+    "channel_drift"
 )
 
-
-# Store results
-all_avg_iters = {}
-
-
-# ============================================================
-# Run simulations
-# ============================================================
-
-for M in M_values:
-
-    print(
-        f"Simulating M = {M} ..."
-    )
-
-    all_avg_iters[M] = simulate_for_M(
-        M,
-        target_dB
-    )
-
-
-print("\nSimulation completed.")
-
-
-# ============================================================
-# Print average iterations at 20 dB
-# ============================================================
-
-idx_20dB = np.where(
-    target_dB == 20
-)[0][0]
-
-
-print(
-    "\n=== Average iterations at 20 dB SNR ==="
+phase_error_avg = average_family(
+    phase_error_bounds,
+    "phase_error"
 )
 
+feedback_delay_avg = average_family(
+    feedback_delays_s,
+    "feedback_delay"
+)
 
-for M in M_values:
+reflection_magnitude_avg = average_family(
+    reflection_magnitude_values,
+    "reflection_magnitude"
+)
 
-    val = all_avg_iters[M][idx_20dB]
+# ============================================================
+# USER-EDITABLE PLOT SETTINGS
+# ============================================================
 
-    if np.isnan(val):
+# -----------------------------
+# Axis labels
+# -----------------------------
+X_LABEL = r"Number of iterations ($k$)"
+Y_LABEL = r"Received SNR ($\gamma$)"
 
-        print(
-            f"M = {M:3d} : Not reached"
+# -----------------------------
+# Grid settings
+# -----------------------------
+GRID_ON = True
+GRID_STYLE = "--"
+GRID_ALPHA = 0.35
+GRID_WIDTH = 0.6
+X_TICK_STEP = 10
+
+# -----------------------------
+# Line / marker settings
+# -----------------------------
+LINE_WIDTH = 2.0
+MARKER_SIZE = 5
+MARK_EVERY = 8
+
+# Marker mapping:
+# green -> circle
+# blue  -> square
+# black -> diamond
+# red   -> triangle
+CURVE_MARKERS = [
+    "o",   # circle
+    "s",   # square
+    "D",   # diamond
+    "^",   # triangle
+]
+
+# -----------------------------
+# Fig. 4(a): Channel-drift colors and legends
+# -----------------------------
+CHANNEL_DRIFT_COLORS = [
+    "green",
+    "blue",
+    "black",
+    "red",
+]
+
+CHANNEL_DRIFT_LEGENDS = [
+    rf"$\delta_m(k)=\pi/50$,  v={channel_drift_speed_mps[0]:.2f} m/s",
+    rf"$\delta_m(k)=\pi/25$,  v={channel_drift_speed_mps[1]:.2f} m/s",
+    rf"$\delta_m(k)= 3\pi/50$, v={channel_drift_speed_mps[2]:.2f} m/s",
+    rf"$\delta_m(k)= 2\pi/25$, v={channel_drift_speed_mps[3]:.2f} m/s",
+]
+
+# -----------------------------
+# Fig. 4(b): Phase-error colors and legends
+# -----------------------------
+PHASE_ERROR_COLORS = [
+    "green",
+    "blue",
+    "black",
+    "red",
+]
+
+PHASE_ERROR_LEGENDS = [
+    r"$e_m(k)=0$",
+    r"$e_m(k)=\pi/36$",
+    r"$e_m(k)=\pi/18$",
+    r"$e_m(k)=\pi/9$",
+]
+
+# -----------------------------
+# Fig. 4(c): Feedback-delay colors and legends
+# -----------------------------
+FEEDBACK_DELAY_COLORS = [
+    "green",
+    "blue",
+    "black",
+    "red",
+]
+
+FEEDBACK_DELAY_LEGENDS = [
+    r"$\tau_{\mathrm{fb}}=0$ ms",
+    r"$\tau_{\mathrm{fb}}=1$ ms",
+    r"$\tau_{\mathrm{fb}}=3$ ms",
+    r"$\tau_{\mathrm{fb}}=5$ ms",
+]
+
+# -----------------------------
+# Fig. 4(d): Reflection-magnitude colors and legends
+# -----------------------------
+REFLECTION_COLORS = [
+    "green",
+    "blue",
+    "black",
+    "red",
+]
+
+REFLECTION_LEGENDS = [
+    r"$\eta=1.0$",
+    r"$\eta=0.9$",
+    r"$\eta=0.8$",
+    r"$\eta=0.7$",
+]
+
+# -----------------------------
+# Output folder (PNG only)
+# -----------------------------
+output_dir = Path.cwd() / "figure4_png_results"
+output_dir.mkdir(parents=True, exist_ok=True)
+
+# ============================================================
+# Plot function for subplot
+# ============================================================
+def plot_family_on_axis(ax, curves, legends, colors, markers, panel_label):
+    k_axis = np.arange(K)
+
+    for curve, legend, color, marker in zip(
+        curves,
+        legends,
+        colors,
+        markers
+    ):
+        ax.plot(
+            k_axis,
+            curve,
+            color=color,
+            linewidth=LINE_WIDTH,
+            marker=marker,
+            markersize=MARKER_SIZE,
+            markevery=MARK_EVERY,
+            label=legend,
         )
 
-    else:
+    ax.set_xlabel(X_LABEL)
+    ax.set_ylabel(Y_LABEL)
 
-        print(
-            f"M = {M:3d} : "
-            f"{val:.2f} iterations"
-        )
-
-
-# ============================================================
-# Publication-quality plotting parameters
-# ============================================================
-
-plt.rcParams.update({
-
-    # Font
-    'font.family': 'Arial',
-
-    # General font size
-    'font.size': 10,
-
-    # Axis labels
-    'axes.labelsize': 11,
-
-    # Tick labels
-    'xtick.labelsize': 9,
-    'ytick.labelsize': 9,
-
-    # Legend
-    'legend.fontsize': 9,
-
-    # Axis line width
-    'axes.linewidth': 0.8,
-
-    # Tick widths
-    'xtick.major.width': 0.8,
-    'ytick.major.width': 0.8,
-
-    # Tick lengths
-    'xtick.major.size': 4,
-    'ytick.major.size': 4
-})
-
-
-# ============================================================
-# Create figure
-# ============================================================
-
-fig, ax = plt.subplots(
-    figsize=(8, 5)
-)
-
-
-# ============================================================
-# Original color and marker scheme
-#
-# M = 64   -> red + triangle
-# M = 128  -> blue + square
-# M = 256  -> green + circle
-# ============================================================
-
-style_map = {
-
-    64: {
-        'color': 'red',
-        'marker': '^'
-    },
-
-    128: {
-        'color': 'blue',
-        'marker': 's'
-    },
-
-    256: {
-        'color': 'green',
-        'marker': 'o'
-    }
-}
-
-
-# ============================================================
-# Plot each M
-# ============================================================
-
-for M in M_values:
-
-    # Remove NaN values
-    valid = ~np.isnan(
-        all_avg_iters[M]
+    ax.grid(
+        GRID_ON,
+        which="major",
+        linestyle=GRID_STYLE,
+        linewidth=GRID_WIDTH,
+        alpha=GRID_ALPHA,
     )
 
-    dB_vals = target_dB[valid]
+    ax.set_xticks(np.arange(0, K + 1, X_TICK_STEP))
 
-    iter_vals = np.array(
-        all_avg_iters[M]
-    )[valid]
-
-    style = style_map[M]
-
-
-    ax.plot(
-        dB_vals,
-        iter_vals,
-
-        # Original color
-        color=style['color'],
-
-        # Original marker
-        marker=style['marker'],
-
-        # Original line width
-        linewidth=2.0,
-
-        # Original marker size
-        markersize=6,
-
-        # Marker every second point
-        markevery=2,
-
-        # Legend
-        label=f'M = {M}'
+    ax.legend(
+        loc="best",
+        frameon=True,
+        edgecolor="black",
+        framealpha=1.0,
+        fontsize=8,
     )
 
+    ax.text(
+        0.5,
+        -0.22,
+        panel_label,
+        transform=ax.transAxes,
+        ha="center",
+        va="top",
+        fontsize=11
+    )
 
 # ============================================================
-# X-axis label
+# Generate ONE 2x2 combined figure
 # ============================================================
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+axes = axes.flatten()
 
-ax.set_xlabel(
-    r'Target Received SNR $\gamma$ (dB)',
-    fontsize=11
+plot_family_on_axis(
+    axes[0],
+    channel_drift_avg,
+    CHANNEL_DRIFT_LEGENDS,
+    CHANNEL_DRIFT_COLORS,
+    CURVE_MARKERS,
+    "(a)"
 )
 
-
-# ============================================================
-# Y-axis label
-# ============================================================
-
-ax.set_ylabel(
-    'Average Number of Iterations',
-    fontsize=11
+plot_family_on_axis(
+    axes[1],
+    phase_error_avg,
+    PHASE_ERROR_LEGENDS,
+    PHASE_ERROR_COLORS,
+    CURVE_MARKERS,
+    "(b)"
 )
 
-
-# ============================================================
-# Tick formatting
-# ============================================================
-
-ax.tick_params(
-    axis='both',
-    which='major',
-    direction='in',
-    length=4,
-    width=0.8
+plot_family_on_axis(
+    axes[2],
+    feedback_delay_avg,
+    FEEDBACK_DELAY_LEGENDS,
+    FEEDBACK_DELAY_COLORS,
+    CURVE_MARKERS,
+    "(c)"
 )
 
-
-# Minor ticks
-ax.minorticks_on()
-
-ax.tick_params(
-    axis='both',
-    which='minor',
-    direction='in',
-    length=2.5,
-    width=0.6
+plot_family_on_axis(
+    axes[3],
+    reflection_magnitude_avg,
+    REFLECTION_LEGENDS,
+    REFLECTION_COLORS,
+    CURVE_MARKERS,
+    "(d)"
 )
 
+fig.tight_layout()
 
-# ============================================================
-# Grid
-# ============================================================
-
-ax.grid(
-    True,
-    which='major',
-    linestyle='--',
-    linewidth=0.6,
-    alpha=0.6
-)
-
-
-# ============================================================
-# Legend
-# ============================================================
-
-legend = ax.legend(
-    loc='best',
-    frameon=True,
-    fancybox=False,
-    edgecolor='black',
-    framealpha=1.0,
-    borderpad=0.5,
-    handlelength=2.5
-)
-
-
-# White opaque legend background
-legend.get_frame().set_facecolor(
-    'white'
-)
-
-legend.get_frame().set_alpha(
-    1.0
-)
-
-
-# ============================================================
-# Layout
-# ============================================================
-
-fig.tight_layout(
-    pad=0.8
-)
-
-
-# ============================================================
-# Save high-resolution PNG
-# ============================================================
-
-output_file = (
-    'figure5_M64_128_256.png'
-)
-
-
+save_path = output_dir / "figure4_combined_2x2.png"
 fig.savefig(
-    output_file,
-
-    # High resolution
+    save_path,
     dpi=600,
-
-    # PNG format
-    format='png',
-
-    # Prevent clipping
-    bbox_inches='tight',
-
-    # Small padding
-    pad_inches=0.05,
-
-    # White background
-    facecolor='white',
-
-    # White edge
-    edgecolor='white'
+    bbox_inches="tight",
+    facecolor="white",
 )
-
-
-# ============================================================
-# Verify PNG properties
-# ============================================================
-
-img = Image.open(
-    output_file
-)
-
-
-print()
-print("============================================")
-print("Figure successfully saved")
-print("============================================")
-print(
-    f"File       : {output_file}"
-)
-print(
-    f"Format     : {img.format}"
-)
-print(
-    f"Image size : {img.size}"
-)
-print(
-    f"Color mode : {img.mode}"
-)
-print(
-    f"Resolution : "
-    f"{img.info.get('dpi', 'Not stored')}"
-)
-print("============================================")
-
-
-# ============================================================
-# Display figure
-# ============================================================
 
 plt.show()
+
+print("PNG figure saved in:")
+print(save_path)
