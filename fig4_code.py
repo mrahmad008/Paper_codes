@@ -1,538 +1,293 @@
+# -----------------------------------------------------------------------------
+# Static-channel SBF convergence - Fig. 4
+#
+# This script evaluates the convergence behavior of the Single-Bit Feedback
+# (SBF) algorithm under static channel conditions.
+#
+# The IRS contains M = 128 elements. At each iteration, a random phase
+# perturbation is applied and the receiver returns one feedback bit indicating
+# whether the measured SNR has improved. A successful perturbation is retained;
+# otherwise, the previous phase configuration is kept.
+#
+# The perturbation is drawn from
+# U[-pi/20, pi/20].
+#
+# Two independent simulation instances are shown to illustrate the evolution
+# of the received SNR from different initial phase configurations.
+# -----------------------------------------------------------------------------
+
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
-from PIL import Image
-
 
 # ============================================================
-# Parameters
+# FIGURE 3 — STATIC SBF CONVERGENCE
+# Latest 2.4 GHz indoor physically grounded baseline
 # ============================================================
 
+SEED = 42
+rng = np.random.default_rng(SEED)
+
+# -----------------------------
+# Manuscript / algorithm settings
+# -----------------------------
 M = 128
 K = 100
 
-rho = 1.0
-eta = 1.0
-theta = 0.0
 x = 1.0
-var = 1.0
+beta = 0.0
+eta = 0.8
 
-# SBF perturbation range
-eps_low = -np.pi / 7
-eps_high = np.pi / 7
+epsilon_low = -np.pi / 20.0
+epsilon_high = np.pi / 20.0
 
-# Channel drift range
-delta_low = -np.pi / 25
-delta_high = np.pi / 25
+# -----------------------------
+# Latest indoor physical parameters
+# -----------------------------
+carrier_frequency_GHz = 2.4
 
-# Forgetting/decay factor
-lam = 0.98
+ambient_source_power_dBm = 20.0
+ambient_noise_power_dBm = -95.0
 
+# Manuscript definition:
+# rho is the average transmit SNR.
+# Keep rho explicit in the simulation rather than deriving it
+rho_dB = ambient_source_power_dBm - ambient_noise_power_dBm
+rho = 10.0 ** (rho_dB / 10.0)
 
-# ============================================================
-# Time-varying SBF simulation
-# ============================================================
+# Distances
+source_to_receiver_distance_m = 20.0
+source_to_conventional_tag_distance_m = 10.0
+conventional_tag_to_receiver_distance_m = 10.0
+source_to_irs_distance_m = 8.0
+irs_to_receiver_distance_m = 12.0
 
-def simulate_sbf_timevarying(seed=None):
-
-    if seed is not None:
-        np.random.seed(seed)
-
-    # ========================================================
-    # Static channel coefficients
-    # ========================================================
-
-    h_sr = np.sqrt(var / 2) * (
-        np.random.randn()
-        + 1j * np.random.randn()
+# -----------------------------
+# 3GPP TR 38.901 InH path loss
+# -----------------------------
+def indoor_los_path_loss_dB(distance_m, frequency_GHz):
+    return (
+        32.4
+        + 17.3 * np.log10(distance_m)
+        + 20.0 * np.log10(frequency_GHz)
     )
 
-    h_st = np.sqrt(var / 2) * (
-        np.random.randn()
-        + 1j * np.random.randn()
+def indoor_nlos_path_loss_dB(distance_m, frequency_GHz):
+    los = indoor_los_path_loss_dB(distance_m, frequency_GHz)
+    nlos_candidate = (
+        17.30
+        + 38.3 * np.log10(distance_m)
+        + 24.9 * np.log10(frequency_GHz)
+    )
+    return max(los, nlos_candidate)
+
+# NLOS for source->receiver and conventional-tag links
+source_to_receiver_PL_dB = indoor_nlos_path_loss_dB(
+    source_to_receiver_distance_m,
+    carrier_frequency_GHz
+)
+
+source_to_conventional_tag_PL_dB = indoor_nlos_path_loss_dB(
+    source_to_conventional_tag_distance_m,
+    carrier_frequency_GHz
+)
+
+conventional_tag_to_receiver_PL_dB = indoor_nlos_path_loss_dB(
+    conventional_tag_to_receiver_distance_m,
+    carrier_frequency_GHz
+)
+
+# LOS path-loss cases for IRS-associated links
+source_to_irs_PL_dB = indoor_los_path_loss_dB(
+    source_to_irs_distance_m,
+    carrier_frequency_GHz
+)
+
+irs_to_receiver_PL_dB = indoor_los_path_loss_dB(
+    irs_to_receiver_distance_m,
+    carrier_frequency_GHz
+)
+
+# Existing manuscript Rayleigh variances
+source_to_receiver_variance = 10.0 ** (-source_to_receiver_PL_dB / 10.0)
+source_to_conventional_tag_variance = 10.0 ** (-source_to_conventional_tag_PL_dB / 10.0)
+conventional_tag_to_receiver_variance = 10.0 ** (-conventional_tag_to_receiver_PL_dB / 10.0)
+source_to_irs_variance = 10.0 ** (-source_to_irs_PL_dB / 10.0)
+irs_to_receiver_variance = 10.0 ** (-irs_to_receiver_PL_dB / 10.0)
+
+# -----------------------------
+# CSCG / Rayleigh generators
+# -----------------------------
+def cn_scalar(variance):
+    return np.sqrt(variance / 2.0) * (
+        rng.standard_normal()
+        + 1j * rng.standard_normal()
     )
 
-    h_tr = np.sqrt(var / 2) * (
-        np.random.randn()
-        + 1j * np.random.randn()
+def cn_vector(variance, size):
+    return np.sqrt(variance / 2.0) * (
+        rng.standard_normal(size)
+        + 1j * rng.standard_normal(size)
     )
 
-    h_si = np.sqrt(var / 2) * (
-        np.random.randn(M)
-        + 1j * np.random.randn(M)
+# -----------------------------
+# ONE common static channel realization
+# -----------------------------
+source_to_receiver_channel = cn_scalar(
+    source_to_receiver_variance
+)
+
+source_to_conventional_tag_channel = cn_scalar(
+    source_to_conventional_tag_variance
+)
+
+conventional_tag_to_receiver_channel = cn_scalar(
+    conventional_tag_to_receiver_variance
+)
+
+source_to_irs_channel = cn_vector(
+    source_to_irs_variance,
+    M
+)
+
+irs_to_receiver_channel = cn_vector(
+    irs_to_receiver_variance,
+    M
+)
+
+# Manuscript non-IRS component
+C = (
+    source_to_receiver_channel
+    + source_to_conventional_tag_channel
+    * x
+    * np.exp(1j * beta)
+    * conventional_tag_to_receiver_channel
+)
+
+# -----------------------------
+# Static SBF
+# -----------------------------
+def simulate_static_sbf(initial_phases):
+    phi_best = initial_phases.copy()
+
+    irs_sum = np.sum(
+        irs_to_receiver_channel
+        * np.exp(1j * phi_best)
+        * source_to_irs_channel
     )
 
-    h_ir = np.sqrt(var / 2) * (
-        np.random.randn(M)
-        + 1j * np.random.randn(M)
+    G = (
+        C
+        + eta * irs_sum * x
     )
 
-
-    # ========================================================
-    # Direct path and IRS channel
-    # ========================================================
-
-    direct = (
-        h_sr
-        + h_st
-        * x
-        * np.exp(1j * theta)
-        * h_tr
-    )
-
-    g = h_ir * h_si
-
-
-    # ========================================================
-    # Initial phase configuration
-    # ========================================================
-
-    # Same initial phase concept for SBF and baseline
-    phi_init = np.random.uniform(
-        0,
-        2 * np.pi,
-        M
-    )
-
-    phi_best = phi_init.copy()
-
-    # Initial channel phase drift
-    phi_channel = np.zeros(M)
-
-
-    # ========================================================
-    # Initial SNR
-    # ========================================================
-
-    sum_irs = np.sum(
-        g
-        * np.exp(
-            1j * (
-                phi_best
-                + phi_channel
-            )
-        )
-    )
-
-    gamma = (
-        rho
-        * np.abs(
-            direct
-            + eta * sum_irs
-        ) ** 2
-    )
-
-    gamma_best = gamma
-
-
-    # ========================================================
-    # Allocate history arrays
-    # ========================================================
+    gamma_best = rho * np.abs(G) ** 2
 
     gamma_history = np.zeros(K)
-
     gamma_history[0] = gamma_best
 
-
-    # ========================================================
-    # Baseline:
-    # Initial phases remain fixed while the channel drifts
-    # ========================================================
-
-    baseline_history = np.zeros(K)
-
-    baseline_history[0] = gamma
-
-
-    # ========================================================
-    # Iterative simulation
-    # ========================================================
-
     for k in range(1, K):
-
-        # ----------------------------------------------------
-        # Random SBF phase perturbation
-        # ----------------------------------------------------
-
-        eps = np.random.uniform(
-            eps_low,
-            eps_high,
+        epsilon = rng.uniform(
+            epsilon_low,
+            epsilon_high,
             M
         )
 
+        phi_trial = phi_best + epsilon
 
-        # ----------------------------------------------------
-        # Channel phase drift
-        # ----------------------------------------------------
-
-        delta = np.random.uniform(
-            delta_low,
-            delta_high,
-            M
+        irs_sum_trial = np.sum(
+            irs_to_receiver_channel
+            * np.exp(1j * phi_trial)
+            * source_to_irs_channel
         )
 
-        phi_channel_new = (
-            phi_channel
-            + delta
+        G_trial = (
+            C
+            + eta * irs_sum_trial * x
         )
 
+        gamma_trial = rho * np.abs(G_trial) ** 2
 
-        # ====================================================
-        # SBF update
-        # ====================================================
-
-        phi_candidate = (
-            phi_best
-            + eps
-        )
-
-        sum_irs_new = np.sum(
-            g
-            * np.exp(
-                1j * (
-                    phi_candidate
-                    + phi_channel_new
-                )
-            )
-        )
-
-        gamma_new = (
-            rho
-            * np.abs(
-                direct
-                + eta * sum_irs_new
-            ) ** 2
-        )
-
-
-        # ----------------------------------------------------
-        # Accept or decay
-        # ----------------------------------------------------
-
-        if gamma_new > gamma_best:
-
-            phi_best = phi_candidate
-
-            gamma_best = gamma_new
-
-        else:
-
-            gamma_best = (
-                lam
-                * gamma_best
-            )
-
-
-        # ====================================================
-        # Baseline: fixed initial phases
-        # ====================================================
-
-        sum_irs_baseline = np.sum(
-            g
-            * np.exp(
-                1j * (
-                    phi_init
-                    + phi_channel_new
-                )
-            )
-        )
-
-        baseline = (
-            rho
-            * np.abs(
-                direct
-                + eta * sum_irs_baseline
-            ) ** 2
-        )
-
-
-        # ====================================================
-        # Store results
-        # ====================================================
+        if gamma_trial > gamma_best:
+            phi_best = phi_trial
+            gamma_best = gamma_trial
 
         gamma_history[k] = gamma_best
 
-        baseline_history[k] = baseline
+    return gamma_history
 
+# Algorithm-1-consistent initialization
+phi_initial_1 = rng.uniform(-np.pi, np.pi, M)
+phi_initial_2 = rng.uniform(-np.pi, np.pi, M)
 
-        # ====================================================
-        # Update channel for next iteration
-        # ====================================================
+gamma_1 = simulate_static_sbf(phi_initial_1)
+gamma_2 = simulate_static_sbf(phi_initial_2)
 
-        phi_channel = phi_channel_new
+# -----------------------------
+# Plot
+# -----------------------------
+fig, ax = plt.subplots(figsize=(8, 5))
 
-
-    return gamma_history, baseline_history
-
-
-# ============================================================
-# Run two independent instances
-# ============================================================
-
-instance1, baseline1 = (
-    simulate_sbf_timevarying(None)
-)
-
-instance2, baseline2 = (
-    simulate_sbf_timevarying(None)
-)
-
-
-# ============================================================
-# Publication-quality plotting parameters
-# ============================================================
-
-plt.rcParams.update({
-
-    # Font
-    'font.family': 'Arial',
-
-    # General font size
-    'font.size': 10,
-
-    # Axis labels
-    'axes.labelsize': 11,
-
-    # Tick labels
-    'xtick.labelsize': 9,
-    'ytick.labelsize': 9,
-
-    # Legend
-    'legend.fontsize': 9,
-
-    # Axis line width
-    'axes.linewidth': 0.8,
-
-    # Tick widths
-    'xtick.major.width': 0.8,
-    'ytick.major.width': 0.8,
-
-    # Tick lengths
-    'xtick.major.size': 4,
-    'ytick.major.size': 4
-})
-
-
-# ============================================================
-# Create figure
-# ============================================================
-
-fig, ax = plt.subplots(
-    figsize=(8, 5)
-)
-
-
-# ============================================================
-# SBF Instance 1
-# Original: BLUE solid
-# ============================================================
-
+# Original color convention requested by user
 ax.plot(
-    instance1,
-    label='Instance 1 (SBF)',
+    np.arange(K),
+    gamma_1,
+    color="blue",
     linewidth=2.0,
-    color='blue',
-    linestyle='-'
+    label="Instance 1"
 )
 
-
-# ============================================================
-# SBF Instance 2
-# Original: RED solid
-# ============================================================
-
 ax.plot(
-    instance2,
-    label='Instance 2 (SBF)',
+    np.arange(K),
+    gamma_2,
+    color="red",
     linewidth=2.0,
-    color='red',
-    linestyle='-'
+    label="Instance 2"
 )
 
-
-# ============================================================
-# Baseline 1
-# Original: BLUE dashed
-# ============================================================
-
-ax.plot(
-    baseline1,
-    label='Channel condition (baseline)',
-    linewidth=1.5,
-    color='blue',
-    linestyle='--',
-    alpha=0.7
-)
-
-
-# ============================================================
-# Baseline 2
-# Original: RED dashed
-# ============================================================
-
-ax.plot(
-    baseline2,
-    label='Channel condition (baseline)',
-    linewidth=1.5,
-    color='red',
-    linestyle='--',
-    alpha=0.7
-)
-
-
-# ============================================================
-# X-axis label
-# ============================================================
-
-ax.set_xlabel(
-    'Number of iterations ($k$)',
-    fontsize=11
-)
-
-
-# ============================================================
-# Y-axis label
-# ============================================================
-
-ax.set_ylabel(
-    r'Received SNR ($\gamma$)',
-    fontsize=11
-)
-
-
-# ============================================================
-# Tick formatting
-# ============================================================
-
-ax.tick_params(
-    axis='both',
-    which='major',
-    direction='in',
-    length=4,
-    width=0.8
-)
-
-
-# Minor ticks
-ax.minorticks_on()
-
-ax.tick_params(
-    axis='both',
-    which='minor',
-    direction='in',
-    length=2.5,
-    width=0.6
-)
-
-
-# ============================================================
-# Grid
-# ============================================================
-
-ax.grid(
-    True,
-    which='major',
-    linestyle='--',
-    linewidth=0.6,
-    alpha=0.6
-)
-
-
-# ============================================================
-# Legend
-# ============================================================
+ax.set_xlabel(r"Number of iterations ($k$)")
+ax.set_ylabel(r"Received SNR ($\gamma$)")
+ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.6)
 
 legend = ax.legend(
-    loc='best',
     frameon=True,
     fancybox=False,
-    edgecolor='black',
-    framealpha=1.0,
-    borderpad=0.5,
-    handlelength=2.5
+    edgecolor="black"
 )
+legend.get_frame().set_facecolor("white")
 
-legend.get_frame().set_facecolor(
-    'white'
-)
+fig.tight_layout()
 
-legend.get_frame().set_alpha(
-    1.0
-)
+# -----------------------------
+# Portable output folder
+# -----------------------------
+output_dir = Path.cwd() / "figure3_latest_2p4GHz_indoor"
+output_dir.mkdir(parents=True, exist_ok=True)
 
-
-# ============================================================
-# Layout
-# ============================================================
-
-fig.tight_layout(
-    pad=0.8
-)
-
-
-# ============================================================
-# Save high-resolution PNG
-# ============================================================
-
-output_file = (
-    'figure4_with_channel.png'
-)
+png_path = output_dir / "figure3_static_SBF_2p4GHz_indoor.png"
 
 fig.savefig(
-    output_file,
-
-    # High resolution
+    png_path,
     dpi=600,
-
-    # PNG format
-    format='png',
-
-    # Prevent clipping
-    bbox_inches='tight',
-
-    # Small padding
-    pad_inches=0.05,
-
-    # White background
-    facecolor='white',
-
-    # White edge
-    edgecolor='white'
+    bbox_inches="tight",
+    facecolor="white"
 )
 
 
-# ============================================================
-# Verify PNG properties
-# ============================================================
-
-img = Image.open(
-    output_file
-)
-
+print("=" * 70)
+print("FIGURE 3 — LATEST 2.4 GHz INDOOR BASELINE")
+print("=" * 70)
+print(f"rho = {rho_dB:.2f} dB")
+print(f"Source -> receiver path loss = {source_to_receiver_PL_dB:.3f} dB")
+print(f"Source -> conventional tag path loss = {source_to_conventional_tag_PL_dB:.3f} dB")
+print(f"Conventional tag -> receiver path loss = {conventional_tag_to_receiver_PL_dB:.3f} dB")
+print(f"Source -> IRS path loss = {source_to_irs_PL_dB:.3f} dB")
+print(f"IRS -> receiver path loss = {irs_to_receiver_PL_dB:.3f} dB")
 print()
-print("============================================")
-print("Figure successfully saved")
-print("============================================")
-print(
-    f"File       : {output_file}"
-)
-print(
-    f"Format     : {img.format}"
-)
-print(
-    f"Image size : {img.size}"
-)
-print(
-    f"Color mode : {img.mode}"
-)
-print(
-    f"Resolution : "
-    f"{img.info.get('dpi', 'Not stored')}"
-)
-print("============================================")
-
-
-# ============================================================
-# Display figure
-# ============================================================
+print(f"Instance 1: {gamma_1[0]:.6f} -> {gamma_1[-1]:.6f}")
+print(f"Instance 2: {gamma_2[0]:.6f} -> {gamma_2[-1]:.6f}")
+print()
+print(f"PNG: {png_path}")
+print("=" * 70)
 
 plt.show()
