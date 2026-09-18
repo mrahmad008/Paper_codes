@@ -1,199 +1,502 @@
+# -----------------------------------------------------------------------------
+# BER performance of the MPS-based algorithm - Fig. 7
+#
+# This script evaluates the Matrix of Phase-Shifts (MPS) feedback algorithm
+# for M = 4 IRS elements and MPS sizes N = {4, 6, 8}.
+#
+# Each IRS element uses a 2-bit phase-shift alphabet. The receiver evaluates
+# the predefined phase-shift vectors and feeds back the index of the vector
+# producing the highest measured SNR.
+#
+# IRS phase-shift errors are modeled using
+# U[-pi/6, pi/6].
+#
+# BER results are obtained using 5,000 independent channel realizations.
+# -----------------------------------------------------------------------------
+
+from pathlib import Path
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.special import erfc
-from tqdm import tqdm
+
 
 # ============================================================
-# Parameters for M=4
+# Simulation parameters
 # ============================================================
-M4 = 4
-VAR4 = 1.0
-num_runs = 3000
 
-# PARAFAC parameters
-K = 50
-T = 4
-L = 2
+MASTER_SEED = 42
+rng = np.random.default_rng(MASTER_SEED)
 
-# SNR range
-SNR_dB = np.arange(-10, 21, 2)
-SNR_lin = 10**(SNR_dB/10)
+M = 4
+x = 1.0
+beta_phase = 0.0
+eta = 0.8
+NUM_TRIALS = 5000
 
-np.random.seed(42)
+carrier_frequency_GHz = 2.4
+noise_power_dBm = -95.0
+
+# IRS phase implementation error: +/- 30 degrees
+delta_phi = np.pi / 6.0
+
+Pt_dBm_values = np.arange(-20.0, 31.0, 2.0)
+
+# Distances (m)
+d_sr = 20.0
+d_st = 10.0
+d_tr = 10.0
+d_si = 8.0
+d_ir = 12.0
+
 
 # ============================================================
-# Codebook for MPS (N=8)
+# 3GPP Indoor Hotspot path-loss model
 # ============================================================
-codebook_8 = np.array([
+
+def indoor_los_pl(d, fc):
+    return (
+        32.4
+        + 17.3 * np.log10(d)
+        + 20.0 * np.log10(fc)
+    )
+
+
+def indoor_nlos_pl(d, fc):
+    return max(
+        indoor_los_pl(d, fc),
+        17.30
+        + 38.3 * np.log10(d)
+        + 24.9 * np.log10(fc)
+    )
+
+
+PL_sr = indoor_nlos_pl(d_sr, carrier_frequency_GHz)
+PL_st = indoor_nlos_pl(d_st, carrier_frequency_GHz)
+PL_tr = indoor_nlos_pl(d_tr, carrier_frequency_GHz)
+
+PL_si = indoor_los_pl(d_si, carrier_frequency_GHz)
+PL_ir = indoor_los_pl(d_ir, carrier_frequency_GHz)
+
+beta_sr = 10.0 ** (-PL_sr / 10.0)
+beta_st = 10.0 ** (-PL_st / 10.0)
+beta_tr = 10.0 ** (-PL_tr / 10.0)
+beta_si = 10.0 ** (-PL_si / 10.0)
+beta_ir = 10.0 ** (-PL_ir / 10.0)
+
+
+# ============================================================
+# MPS phase-shift matrices
+# ============================================================
+
+Phi1 = np.array([
     [0, 0, 0, 0],
+    [np.pi, -np.pi / 2, 0, np.pi / 2],
     [0, np.pi, 0, np.pi],
-    [0, 0, np.pi, np.pi],
-    [0, np.pi, np.pi, 0],
-    [0, np.pi/2, 0, np.pi/2],
-    [0, 0, np.pi/2, np.pi/2],
-    [0, np.pi/2, np.pi, 3*np.pi/2],
-    [0, 3*np.pi/2, np.pi, np.pi/2]
-])
+    [np.pi, np.pi / 2, 0, -np.pi / 2]
+], dtype=float)
+
+
+Phi2 = np.array([
+    [0, 0, 0, 0, 0, 0],
+    [np.pi, -np.pi / 2, 0, 0, np.pi / 2, np.pi],
+    [0, np.pi, -np.pi / 2, 0, np.pi, -np.pi / 2],
+    [np.pi, 0, np.pi, 0, np.pi, 0]
+], dtype=float)
+
+
+Phi3 = np.array([
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [
+        np.pi,
+        -np.pi / 2,
+        -np.pi / 2,
+        -np.pi / 2,
+        0,
+        np.pi / 2,
+        np.pi / 2,
+        np.pi / 2
+    ],
+    [
+        0,
+        np.pi / 2,
+        np.pi,
+        -np.pi / 2,
+        0,
+        np.pi / 2,
+        np.pi,
+        -np.pi / 2
+    ],
+    [
+        np.pi,
+        0,
+        np.pi / 2,
+        np.pi,
+        0,
+        np.pi,
+        -np.pi / 2,
+        0
+    ]
+], dtype=float)
+
+
+mps_codebooks = {
+    4: Phi1,
+    6: Phi2,
+    8: Phi3
+}
+
+N_values = [4, 6, 8]
+
 
 # ============================================================
-# Helper functions
+# Complex Gaussian channel generators
 # ============================================================
-def generate_channel(M, var):
-    h_sr = np.sqrt(var/2) * (np.random.randn() + 1j * np.random.randn())
-    h_st = np.sqrt(var/2) * (np.random.randn() + 1j * np.random.randn())
-    h_tr = np.sqrt(var/2) * (np.random.randn() + 1j * np.random.randn())
-    h_si = np.sqrt(var/2) * (np.random.randn(M) + 1j * np.random.randn(M))
-    h_ir = np.sqrt(var/2) * (np.random.randn(M) + 1j * np.random.randn(M))
-    direct = h_sr + h_st * np.exp(1j * 0) * h_tr
-    return direct, h_ir, h_si
 
-def compute_G(phi, direct, h_ir, h_si):
-    return direct + np.sum(h_ir * np.exp(1j * phi) * h_si)
+def cn_scalar(rng, variance, size):
+    return np.sqrt(variance / 2.0) * (
+        rng.standard_normal(size)
+        + 1j * rng.standard_normal(size)
+    )
 
-def mps_gain(direct, h_ir, h_si):
-    best_gamma = -np.inf
-    for phi in codebook_8:
-        G = compute_G(phi, direct, h_ir, h_si)
-        gamma = np.abs(G)**2
-        if gamma > best_gamma:
-            best_gamma = gamma
-    return best_gamma
 
-def run_sbf(direct, h_ir, h_si, M, iterations=100):
-    phi = np.random.uniform(-np.pi, np.pi, M)
-    G = compute_G(phi, direct, h_ir, h_si)
-    gamma_best = np.abs(G)**2
+def cn_vector(rng, variance, shape):
+    return np.sqrt(variance / 2.0) * (
+        rng.standard_normal(shape)
+        + 1j * rng.standard_normal(shape)
+    )
 
-    for _ in range(iterations):
-        eps = np.random.uniform(-np.pi/20, np.pi/20, M)
-        phi_new = phi + eps
-        G_new = compute_G(phi_new, direct, h_ir, h_si)
-        gamma_new = np.abs(G_new)**2
-        if gamma_new > gamma_best:
-            gamma_best = gamma_new
-            phi = phi_new
-    return gamma_best
-
-def perfect_csi_gain(direct, h_ir, h_si):
-    ang_direct = np.angle(direct)
-    ang_irs = np.angle(h_ir * h_si)
-    phi_opt = ang_direct - ang_irs
-    G_opt = compute_G(phi_opt, direct, h_ir, h_si)
-    return np.abs(G_opt)**2
-
-def parafac_effective_snr(snr_lin, K, T, L):
-    scale = 1.0 / (K * T * L)
-    return snr_lin / (1 + scale)
 
 # ============================================================
-# Simulate M=4
+# BPSK BER
 # ============================================================
-print("Simulating M=4...")
-gamma_mps_arr = []
-gamma_sbf_arr = []
-gamma_csi_arr = []
 
-for _ in range(num_runs):
-    direct, h_ir, h_si = generate_channel(M4, VAR4)
-    gamma_mps_arr.append(mps_gain(direct, h_ir, h_si))
-    gamma_sbf_arr.append(run_sbf(direct, h_ir, h_si, M4, iterations=100))
-    gamma_csi_arr.append(perfect_csi_gain(direct, h_ir, h_si))
+def bpsk_ber(gamma):
+    return 0.5 * erfc(
+        np.sqrt(
+            np.maximum(gamma, 0.0)
+        )
+    )
 
-gamma_mps_arr = np.array(gamma_mps_arr)
-gamma_sbf_arr = np.array(gamma_sbf_arr)
-gamma_csi_arr = np.array(gamma_csi_arr)
 
 # ============================================================
-# Simulate M=128 (with reduced variance to keep BER visible)
+# Generate common channel realizations
 # ============================================================
-print("Simulating M=128...")
-M128 = 128
-VAR128 = 10.0 / M128  # moderate array gain
 
-gamma_sbf_128_arr = []
-gamma_csi_128_arr = []
+h_sr = cn_scalar(
+    rng,
+    beta_sr,
+    NUM_TRIALS
+)
 
-num_runs_128 = 500  # fewer runs for speed (increase for smoother curves)
+h_st = cn_scalar(
+    rng,
+    beta_st,
+    NUM_TRIALS
+)
 
-for _ in range(num_runs_128):
-    direct, h_ir, h_si = generate_channel(M128, VAR128)
-    gamma_sbf_128_arr.append(run_sbf(direct, h_ir, h_si, M128, iterations=100))
-    gamma_csi_128_arr.append(perfect_csi_gain(direct, h_ir, h_si))
+h_tr = cn_scalar(
+    rng,
+    beta_tr,
+    NUM_TRIALS
+)
 
-gamma_sbf_128_arr = np.array(gamma_sbf_128_arr)
-gamma_csi_128_arr = np.array(gamma_csi_128_arr)
+h_si = cn_vector(
+    rng,
+    beta_si,
+    (NUM_TRIALS, M)
+)
+
+h_ir = cn_vector(
+    rng,
+    beta_ir,
+    (NUM_TRIALS, M)
+)
+
+
+# Direct + conventional backscatter component
+C = (
+    h_sr
+    + h_st
+    * x
+    * np.exp(1j * beta_phase)
+    * h_tr
+)
+
 
 # ============================================================
-# Compute BER for each SNR
+# MPS simulation
 # ============================================================
-BER_mps = np.zeros(len(SNR_lin))
-BER_sbf = np.zeros(len(SNR_lin))
-BER_csi = np.zeros(len(SNR_lin))
-BER_sbf_128 = np.zeros(len(SNR_lin))
-BER_csi_128 = np.zeros(len(SNR_lin))
 
-for idx, snr in enumerate(tqdm(SNR_lin, desc="SNR sweep")):
-    sigma_w2 = 1 / snr
+rows = []
 
-    # M=4
-    snr_eff_mps = gamma_mps_arr / sigma_w2
-    BER_mps[idx] = np.mean(0.5 * erfc(np.sqrt(snr_eff_mps)))
+rng_error = np.random.default_rng(
+    MASTER_SEED + 100
+)
 
-    snr_eff_sbf = gamma_sbf_arr / sigma_w2
-    BER_sbf[idx] = np.mean(0.5 * erfc(np.sqrt(snr_eff_sbf)))
 
-    snr_eff_csi = gamma_csi_arr / sigma_w2
-    BER_csi[idx] = np.mean(0.5 * erfc(np.sqrt(snr_eff_csi)))
+for N in N_values:
 
-    # M=128
-    snr_eff_sbf_128 = gamma_sbf_128_arr / sigma_w2
-    BER_sbf_128[idx] = np.mean(0.5 * erfc(np.sqrt(snr_eff_sbf_128)))
+    Phi = mps_codebooks[N]
 
-    snr_eff_csi_128 = gamma_csi_128_arr / sigma_w2
-    BER_csi_128[idx] = np.mean(0.5 * erfc(np.sqrt(snr_eff_csi_128)))
+    ideal_candidate_sums = np.zeros(
+        (NUM_TRIALS, N),
+        dtype=complex
+    )
 
-# PARAFAC (analytical)
-BER_parafac = np.array([0.5 * erfc(np.sqrt(parafac_effective_snr(snr, K, T, L))) for snr in SNR_lin])
+    # --------------------------------------------------------
+    # Evaluate every ideal MPS phase-shift candidate
+    # --------------------------------------------------------
+
+    for l in range(N):
+
+        phi_l = Phi[:, l]
+
+        ideal_candidate_sums[:, l] = np.sum(
+            h_ir
+            * np.exp(1j * phi_l)[None, :]
+            * h_si,
+            axis=1
+        )
+
+    G_all_ideal = (
+        C[:, None]
+        + eta
+        * ideal_candidate_sums
+        * x
+    )
+
+    # Select the MPS configuration giving maximum ideal SNR
+    best_index_ideal = np.argmax(
+        np.abs(G_all_ideal) ** 2,
+        axis=1
+    )
+
+    selected_codewords = (
+        Phi[:, best_index_ideal].T
+    )
+
+    # --------------------------------------------------------
+    # IRS phase-setting error
+    #
+    # e_m ~ U[-pi/6, pi/6]
+    # phi_hat_m = phi_m + e_m
+    # --------------------------------------------------------
+
+    phase_errors = rng_error.uniform(
+        low=-delta_phi,
+        high=delta_phi,
+        size=(NUM_TRIALS, M)
+    )
+
+    implemented_phases = (
+        selected_codewords
+        + phase_errors
+    )
+
+    irs_sum_err = np.sum(
+        h_ir
+        * np.exp(1j * implemented_phases)
+        * h_si,
+        axis=1
+    )
+
+    G_err = (
+        C
+        + eta
+        * irs_sum_err
+        * x
+    )
+
+    gain_err = np.abs(G_err) ** 2
+
+    # --------------------------------------------------------
+    # BER versus transmit power
+    # --------------------------------------------------------
+
+    for Pt_dBm in Pt_dBm_values:
+
+        rho_dB = (
+            Pt_dBm
+            - noise_power_dBm
+        )
+
+        rho = 10.0 ** (
+            rho_dB / 10.0
+        )
+
+        gamma = (
+            rho
+            * gain_err
+        )
+
+        ber = bpsk_ber(gamma)
+
+        rows.append({
+            "N": N,
+            "Pt_dBm": float(Pt_dBm),
+            "noise_power_dBm": float(noise_power_dBm),
+            "rho_dB": float(rho_dB),
+            "eta": float(eta),
+            "delta_phi_rad": float(delta_phi),
+            "delta_phi_deg": float(
+                np.degrees(delta_phi)
+            ),
+            "mean_BER": float(
+                np.mean(ber)
+            ),
+            "num_trials": NUM_TRIALS
+        })
+
+
+# ============================================================
+# Convert results to DataFrame
+# ============================================================
+
+results_df = pd.DataFrame(rows)
+
 
 # ============================================================
 # Plot
 # ============================================================
-plt.figure(figsize=(8, 6))
 
-# M=4 curves
-plt.semilogy(SNR_dB, BER_parafac, 'k-d', linewidth=2.5, markersize=8, label='PARAFAC (CSI Estimation)')
-plt.semilogy(SNR_dB, BER_mps, 'r-^', linewidth=2.5, markersize=8, label='MPS (N=8)')
-plt.semilogy(SNR_dB, BER_sbf, 'b-s', linewidth=2.5, markersize=8, label='SBF (M=4)')
-plt.semilogy(SNR_dB, BER_csi, 'g-o', linewidth=2.5, markersize=8, label='Perfect CSI (M=4)')
+fig, ax = plt.subplots(
+    figsize=(8.5, 5.8)
+)
 
-# M=128 curves
-plt.semilogy(SNR_dB, BER_sbf_128, 'b--s', linewidth=2.5, markersize=8, label='SBF (M=128)')
-plt.semilogy(SNR_dB, BER_csi_128, 'g--o', linewidth=2.5, markersize=8, label='Perfect CSI (M=128)')
 
-# Professional grid (major + minor)
-plt.grid(True, which='major', linestyle='--', linewidth=0.8, color='gray', alpha=0.7)
-plt.grid(True, which='minor', linestyle=':', linewidth=0.5, color='lightgray', alpha=0.5)
-plt.minorticks_on()
+style_map = {
+    4: {
+        "color": "red",
+        "marker": "^"
+    },
+    6: {
+        "color": "blue",
+        "marker": "s"
+    },
+    8: {
+        "color": "green",
+        "marker": "o"
+    },
+}
 
-plt.xlabel(r'Average Transmit SNR $\rho$ (dB)', fontsize=14)
-plt.ylabel('Bit Error Rate (BER)', fontsize=14)
-plt.legend(fontsize=9, loc='upper right')
-plt.ylim([1e-6, 1])
-plt.xlim([-11, 21])
-plt.tight_layout()
-plt.savefig('figure7_with_M128.png', dpi=600)
+
+for N in N_values:
+
+    d = (
+        results_df[
+            results_df["N"] == N
+        ]
+        .sort_values("Pt_dBm")
+    )
+
+    s = style_map[N]
+
+    ax.semilogy(
+        d["Pt_dBm"],
+        d["mean_BER"],
+        color=s["color"],
+        marker=s["marker"],
+        linestyle="-",
+        linewidth=2.1,
+        markersize=6,
+        label=rf"$N={N}$, $e_m=\pi/6$"
+    )
+
+
+ax.set_xlabel(
+    "Transmit Power (dBm)"
+)
+
+ax.set_ylabel(
+    "Bit Error Rate (BER)"
+)
+
+ax.set_xlim(
+    Pt_dBm_values.min() - 1,
+    Pt_dBm_values.max() + 1
+)
+
+ax.set_ylim(
+    1e-15,
+    1
+)
+
+ax.minorticks_on()
+
+ax.grid(
+    True,
+    which="major",
+    linestyle="--",
+    linewidth=0.7,
+    alpha=0.5
+)
+
+ax.grid(
+    True,
+    which="minor",
+    linestyle=":",
+    linewidth=0.5,
+    alpha=0.25
+)
+
+ax.legend(
+    loc="best",
+    frameon=True,
+    edgecolor="black",
+    framealpha=1.0,
+    fontsize=9
+)
+
+fig.tight_layout()
+
+
+# ============================================================
+# Save results
+# ============================================================
+
+# Save inside a folder in the current working directory.
+# This avoids the /mnt/data FileNotFoundError.
+output_dir = (
+    Path.cwd()
+    / "figure7_outputs"
+)
+
+output_dir.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+png_path = (
+    output_dir
+    / "Figure7_BER_vs_transmit_power_phase_error.png"
+)
+
+csv_path = (
+    output_dir
+    / "Figure7_BER_vs_transmit_power_phase_error.csv"
+)
+
+
+fig.savefig(
+    png_path,
+    dpi=600,
+    bbox_inches="tight",
+    facecolor="white"
+)
+
+results_df.to_csv(
+    csv_path,
+    index=False
+)
+
+
+print("Figure saved to:")
+print(png_path.resolve())
+
+print("\nCSV saved to:")
+print(csv_path.resolve())
+
+
 plt.show()
 
-# ============================================================
-# Print values at 10 dB
-# ============================================================
-idx10 = np.where(SNR_dB == 10)[0][0]
-print("\n" + "="*60)
-print("BER at SNR = 10 dB")
-print("="*60)
-print(f"PARAFAC:        {BER_parafac[idx10]:.2e}")
-print(f"MPS (M=4):      {BER_mps[idx10]:.2e}")
-print(f"SBF (M=4):      {BER_sbf[idx10]:.2e}")
-print(f"Perfect CSI (M=4): {BER_csi[idx10]:.2e}")
-print(f"SBF (M=128):    {BER_sbf_128[idx10]:.2e}")
-print(f"Perfect CSI (M=128): {BER_csi_128[idx10]:.2e}")
