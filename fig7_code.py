@@ -1,19 +1,3 @@
-# -----------------------------------------------------------------------------
-# BER performance of the MPS-based algorithm - Fig. 7
-#
-# This script evaluates the Matrix of Phase-Shifts (MPS) feedback algorithm
-# for M = 4 IRS elements and MPS sizes N = {4, 6, 8}.
-#
-# Each IRS element uses a 2-bit phase-shift alphabet. The receiver evaluates
-# the predefined phase-shift vectors and feeds back the index of the vector
-# producing the highest measured SNR.
-#
-# IRS phase-shift errors are modeled using
-# U[-pi/6, pi/6].
-#
-# BER results are obtained using 5,000 independent channel realizations.
-# -----------------------------------------------------------------------------
-
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -36,9 +20,6 @@ NUM_TRIALS = 5000
 
 carrier_frequency_GHz = 2.4
 noise_power_dBm = -95.0
-
-# IRS phase implementation error: +/- 30 degrees
-delta_phi = np.pi / 6.0
 
 Pt_dBm_values = np.arange(-20.0, 31.0, 2.0)
 
@@ -230,10 +211,6 @@ C = (
 
 rows = []
 
-rng_error = np.random.default_rng(
-    MASTER_SEED + 100
-)
-
 
 for N in N_values:
 
@@ -245,7 +222,7 @@ for N in N_values:
     )
 
     # --------------------------------------------------------
-    # Evaluate every ideal MPS phase-shift candidate
+    # Evaluate every MPS phase-shift candidate
     # --------------------------------------------------------
 
     for l in range(N):
@@ -266,7 +243,7 @@ for N in N_values:
         * x
     )
 
-    # Select the MPS configuration giving maximum ideal SNR
+    # Select the MPS configuration giving maximum SNR
     best_index_ideal = np.argmax(
         np.abs(G_all_ideal) ** 2,
         axis=1
@@ -277,38 +254,25 @@ for N in N_values:
     )
 
     # --------------------------------------------------------
-    # IRS phase-setting error
-    #
-    # e_m ~ U[-pi/6, pi/6]
-    # phi_hat_m = phi_m + e_m
+    # Apply the selected MPS phase shifts directly
+    # No IRS phase-setting error is included
     # --------------------------------------------------------
 
-    phase_errors = rng_error.uniform(
-        low=-delta_phi,
-        high=delta_phi,
-        size=(NUM_TRIALS, M)
-    )
-
-    implemented_phases = (
-        selected_codewords
-        + phase_errors
-    )
-
-    irs_sum_err = np.sum(
+    irs_sum = np.sum(
         h_ir
-        * np.exp(1j * implemented_phases)
+        * np.exp(1j * selected_codewords)
         * h_si,
         axis=1
     )
 
-    G_err = (
+    G_selected = (
         C
         + eta
-        * irs_sum_err
+        * irs_sum
         * x
     )
 
-    gain_err = np.abs(G_err) ** 2
+    gain_selected = np.abs(G_selected) ** 2
 
     # --------------------------------------------------------
     # BER versus transmit power
@@ -327,7 +291,7 @@ for N in N_values:
 
         gamma = (
             rho
-            * gain_err
+            * gain_selected
         )
 
         ber = bpsk_ber(gamma)
@@ -338,10 +302,6 @@ for N in N_values:
             "noise_power_dBm": float(noise_power_dBm),
             "rho_dB": float(rho_dB),
             "eta": float(eta),
-            "delta_phi_rad": float(delta_phi),
-            "delta_phi_deg": float(
-                np.degrees(delta_phi)
-            ),
             "mean_BER": float(
                 np.mean(ber)
             ),
@@ -400,7 +360,7 @@ for N in N_values:
         linestyle="-",
         linewidth=2.1,
         markersize=6,
-        label=rf"$N={N}$, $e_m=\pi/6$"
+        label=rf"$N={N}$"
     )
 
 
@@ -418,7 +378,7 @@ ax.set_xlim(
 )
 
 ax.set_ylim(
-    1e-15,
+    1e-12,
     1
 )
 
@@ -455,8 +415,6 @@ fig.tight_layout()
 # Save results
 # ============================================================
 
-# Save inside a folder in the current working directory.
-# This avoids the /mnt/data FileNotFoundError.
 output_dir = (
     Path.cwd()
     / "figure7_outputs"
@@ -469,12 +427,12 @@ output_dir.mkdir(
 
 png_path = (
     output_dir
-    / "Figure7_BER_vs_transmit_power_phase_error.png"
+    / "Figure7_BER_vs_transmit_power.png"
 )
 
 csv_path = (
     output_dir
-    / "Figure7_BER_vs_transmit_power_phase_error.csv"
+    / "Figure7_BER_vs_transmit_power.csv"
 )
 
 
@@ -499,4 +457,3 @@ print(csv_path.resolve())
 
 
 plt.show()
-
