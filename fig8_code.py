@@ -1,28 +1,3 @@
-# -----------------------------------------------------------------------------
-# BER benchmark comparison - Fig. 8
-#
-# This script compares the proposed MPS- and SBF-based phase-adjustment
-# algorithms with the QPSA and perfect-CSI benchmarks.
-#
-# For M = 4, the comparison includes:
-#   - MPS with N = 8 phase-shift vectors
-#   - Single-Bit Feedback (SBF)
-#   - Quantized Phase-Shift Adjustment (QPSA)
-#   - Perfect-CSI phase adjustment
-#
-# Additional SBF and perfect-CSI results are generated for M = 128.
-#
-# In the perfect-CSI case, each IRS phase is selected to coherently align the
-# corresponding cascaded IRS channel with the non-IRS channel. QPSA first
-# obtains the CSI-based continuous phase and then quantizes it to the 2-bit
-# phase alphabet.
-#
-# SBF does not use explicit CSI and instead updates the IRS phases using
-# one-bit receiver feedback. The perturbation follows U[-pi/20, pi/20].
-#
-# BER results are generated over 5,000 independent channel realizations.
-# -----------------------------------------------------------------------------
-
 from pathlib import Path
 import json
 import numpy as np
@@ -31,7 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.special import erfc
 
 # ============================================================
-# FIGURE 7 — REVISED STATE-OF-THE-ART BENCHMARK
+# FIGURE 8 — REVISED STATE-OF-THE-ART BENCHMARK
 # ============================================================
 # Replaces PARAFAC with a backscatter-specific RIS phase benchmark
 # adapted from:
@@ -190,11 +165,38 @@ h_st = complex_gaussian(var_st, NUM_RUNS)
 h_tr = complex_gaussian(var_tr, NUM_RUNS)
 
 # Generate M=128 once; M=4 uses the first four elements.
-h_si_128 = complex_gaussian(var_si, (NUM_RUNS, M128))
-h_ir_128 = complex_gaussian(var_ir, (NUM_RUNS, M128))
+# Generate the M=4 channels first so that they are exactly
+# identical to the M=4 channel realizations used in Fig. 7.
+h_si_4 = complex_gaussian(
+    var_si,
+    (NUM_RUNS, M4)
+)
 
-h_si_4 = h_si_128[:, :M4]
-h_ir_4 = h_ir_128[:, :M4]
+h_ir_4 = complex_gaussian(
+    var_ir,
+    (NUM_RUNS, M4)
+)
+
+# Generate the additional elements required for M=128.
+h_si_extra = complex_gaussian(
+    var_si,
+    (NUM_RUNS, M128 - M4)
+)
+
+h_ir_extra = complex_gaussian(
+    var_ir,
+    (NUM_RUNS, M128 - M4)
+)
+
+h_si_128 = np.concatenate(
+    (h_si_4, h_si_extra),
+    axis=1
+)
+
+h_ir_128 = np.concatenate(
+    (h_ir_4, h_ir_extra),
+    axis=1
+)
 
 # Composite non-IRS contribution from the manuscript model.
 direct = (
