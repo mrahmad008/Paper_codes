@@ -1,33 +1,3 @@
-# -----------------------------------------------------------------------------
-# Validation of the relative-phase distribution - Fig. 2
-#
-# This script generates Fig. 2 of the manuscript. It compares the
-# amplitude-weighted empirical distribution of the relative effective IRS
-# phases, theta_m, obtained from the SBF simulation with the analytical
-# phase-distribution model derived for the static-channel case.
-#
-# The analytical distribution is the zero-mean von Mises
-# (exponential-cosine) distribution
-#
-#   f_theta(theta) = exp(mu*cos(theta)) / (2*pi*I0(mu)),
-#
-# where the concentration parameter mu is determined from the corrected
-# amplitude-weighted phase-moment constraint used in the manuscript.
-#
-# The constraint includes the realized complex non-IRS component C, so the
-# analytical distribution accounts for both the IRS-assisted component and
-# the non-IRS contribution to the received signal.
-#
-# The empirical phase samples are obtained from the relative effective phases
-# of the IRS elements after SBF phase adjustment. Their contribution is
-# weighted by the corresponding cascaded-channel amplitudes.
-#
-# Gaussian and Laplacian distributions are also included as reference
-# approximations. The purpose of this figure is to compare these distributions
-# with the empirical phase data and assess the accuracy of the large-M
-# statistical approximation used in the convergence analysis.
-# -----------------------------------------------------------------------------
-
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import i0e, i1e
@@ -782,7 +752,7 @@ plt.plot(
     expo_cosine,
     color="green",
     linewidth=2.5,
-    label="Expo-Cosine"
+    label="von Mises (Exponential-Cosine)"
 )
 
 
@@ -824,7 +794,7 @@ plt.xlabel(
 )
 
 plt.ylabel(
-    r"$f_{\theta}(\theta_m)$",
+    r"$f_{\theta,w}(\theta_m)$",
     fontsize=12
 )
 
@@ -867,4 +837,3 @@ plt.savefig(
 # ============================================================
 
 plt.show()
-
