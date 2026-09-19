@@ -1,50 +1,18 @@
-# =============================================================================
-# IRS-Assisted Backscatter Wireless Communication Simulation
-#
-# This script reproduces part of the numerical results reported in Section 5
-# of the manuscript. The system consists of a transmitter, a conventional
-# backscatter tag (Tag 1), an IRS-assisted backscatter tag (Tag 2), and a
-# receiver.
-#
-# The simulations follow the 3GPP Indoor Hotspot (InH) propagation setting
-# considered in the manuscript, with a carrier frequency of 2.4 GHz.
-# Unless otherwise stated, the main system parameters follow Table 2.
-# Parameters that are varied for a particular experiment are defined
-# separately in the corresponding section of this script.
-#
-# Random channel realizations are generated independently for Monte Carlo
-# evaluation. The generated figures correspond to those reported in the
-# revised manuscript.
-# =============================================================================
-# SBF tracking under time-varying channels - Fig. 5
-#
-# This script evaluates the SBF algorithm when the channel changes between
-# successive iterations. The simulations examine the effects of channel drift,
-# IRS phase-setting error, feedback delay, and reflection coefficient.
-#
-# Unless a parameter is being varied, the simulation uses M = 128,
-# epsilon_max = pi/20, delta_max = pi/25, and lambda = 0.98.
-#
-# The plotted results are averaged over 200 independent channel realizations.
-# The channel-drift model is also related to an equivalent mobility level using
-# the Doppler relation described in the manuscript.
-# -----------------------------------------------------------------------------
-
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
 # ============================================================
-# FIGURE 4 — DYNAMIC SBF ROBUSTNESS STUDY
+# FIGURE 5 — DYNAMIC SBF ROBUSTNESS STUDY
 # Latest 2.4 GHz indoor physically grounded baseline
 #
 # PNG-only version
 #
 # Four separate studies now combined into ONE 2x2 figure:
-#   Fig. 4(a): channel drift
-#   Fig. 4(b): time-varying phase error
-#   Fig. 4(c): feedback delay
-#   Fig. 4(d): reflection magnitude / hardware loss
+#   Fig. 5(a): channel drift
+#   Fig. 5(b): time-varying phase error
+#   Fig. 5(c): feedback delay
+#   Fig. 5(d): reflection magnitude / hardware loss
 # ============================================================
 
 MASTER_SEED = 42
@@ -141,7 +109,7 @@ irs_to_receiver_variance = 10.0 ** (-irs_to_receiver_PL_dB / 10.0)
 # Mobility for feedback-delay aging
 # -----------------------------
 speed_of_light = 3.0e8
-velocity_m_per_s = 2.0
+velocity_m_per_s = 2.5
 
 wavelength_m = speed_of_light / carrier_frequency_Hz
 doppler_frequency_Hz = velocity_m_per_s / wavelength_m
