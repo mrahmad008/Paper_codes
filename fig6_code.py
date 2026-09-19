@@ -1,22 +1,9 @@
-# -----------------------------------------------------------------------------
-# SBF convergence versus number of IRS elements - Fig. 6
-#
-# This experiment measures the average number of SBF iterations required to
-# reach different received-SNR targets.
-#
-# Results are generated for M = {4, 32, 128, 512} under both static and
-# time-varying channel conditions. The time-varying case includes the channel
-# drift model used in Section 5.
-#
-# Each result is averaged over 200 independent channel realizations.
-# -----------------------------------------------------------------------------
-
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
 # ============================================================
-# FAIR COMBINED FIGURE 5
+# FAIR COMBINED FIGURE 6
 # Static vs time-varying SBF target-SNR attainment
 #
 # Fairness rule:
