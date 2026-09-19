@@ -37,10 +37,6 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-# ============================================================
-# FIGURE 3 — STATIC SBF CONVERGENCE
-# Latest 2.4 GHz indoor physically grounded baseline
-# ============================================================
 
 SEED = 42
 rng = np.random.default_rng(SEED)
