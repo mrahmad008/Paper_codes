@@ -64,7 +64,7 @@ from scipy.special import erfc
 # 1. PARAMETERS / REPRODUCIBILITY
 # ============================================================
 
-PIPELINE_VERSION = "figure7_TVT2024_quantized_v1.0"
+PIPELINE_VERSION = "figure7_QPSA_v1.0"
 MASTER_SEED = 42
 rng = np.random.default_rng(MASTER_SEED)
 
@@ -233,22 +233,22 @@ phi_continuous_4 = (
     - np.angle(cascaded_4)
 )
 
-phi_tvt24_4 = quantize_phase_nearest(
+phi_qpsa_4 = quantize_phase_nearest(
     phi_continuous_4,
     QUANT_BITS,
 )
 
-G_tvt24_4 = (
+G_qpsa_4 = (
     direct
     + eta
     * np.sum(
-        cascaded_4 * np.exp(1j * phi_tvt24_4),
+        cascaded_4 * np.exp(1j * phi_qpsa_4),
         axis=1,
     )
     * x
 )
 
-gain_tvt24_4 = np.abs(G_tvt24_4) ** 2
+gain_qpsa_4 = np.abs(G_qpsa_4) ** 2
 
 # ============================================================
 # 6. MPS — M=4, N=8
@@ -405,7 +405,7 @@ def mean_and_ci95(values):
 
 
 method_gains = {
-    "TVT24_Quantized_M4_D2": gain_tvt24_4,
+    "QPSA_M4_D2": gain_qpsa_4,
     "MPS_M4_N8": gain_mps,
     "SBF_M4": gain_sbf_4,
     "Perfect_CSI_M4": gain_csi_4,
@@ -442,7 +442,7 @@ def get_curve(method_name):
     )
 
 
-curve_tvt24 = get_curve("TVT24_Quantized_M4_D2")
+curve_qpsa = get_curve("QPSA_M4_D2")
 curve_mps = get_curve("MPS_M4_N8")
 curve_sbf4 = get_curve("SBF_M4")
 curve_csi4 = get_curve("Perfect_CSI_M4")
@@ -455,7 +455,7 @@ curve_csi128 = get_curve("Perfect_CSI_M128")
 
 # Continuous CSI must be at least as good as quantized benchmark.
 check_csi_vs_quantized = np.all(
-    gain_csi_4 + 1e-30 >= gain_tvt24_4
+    gain_csi_4 + 1e-30 >= gain_qpsa_4
 )
 
 # Exact manuscript MPS candidate count.
@@ -469,14 +469,192 @@ check_csi128_vs_sbf128 = np.all(
 
 # Quantized phases must belong to the D-bit alphabet modulo 2*pi.
 quantized_indices = np.mod(
-    np.round(phi_tvt24_4 / QUANT_STEP),
+    np.round(phi_qpsa_4 / QUANT_STEP),
     QUANT_LEVELS,
 )
 check_quantized_alphabet = np.allclose(
-    phi_tvt24_4,
-    wrap_to_pi(QUANT_STEP * np.round(phi_tvt24_4 / QUANT_STEP)),
+    phi_qpsa_4,
+    wrap_to_pi(QUANT_STEP * np.round(phi_qpsa_4 / QUANT_STEP)),
     atol=1e-12,
 )
+
+# ============================================================
+# 11. TRANSMIT-POWER-AT-TARGET-BER GAIN ANALYSIS
+#     (point estimate, log-linear interpolation of BER vs Pt_dBm)
+# ============================================================
+
+TARGET_BER = 1e-3
+
+def pt_at_target_ber(curve_df, target_ber):
+    """Interpolate (in the log10-BER domain) the transmit power
+    Pt_dBm at which the mean BER curve crosses target_ber."""
+    pt = curve_df["Pt_dBm"].to_numpy()
+    ber = curve_df["mean_BER"].to_numpy()
+
+    valid = np.isfinite(ber) & (ber > 0)
+    pt_v = pt[valid]
+    ber_v = ber[valid]
+
+    order = np.argsort(pt_v)
+    pt_v = pt_v[order]
+    ber_v = ber_v[order]
+
+    log_ber = np.log10(ber_v)
+
+    # np.interp requires increasing xp; log_ber is normally
+    # decreasing in pt_v (BER falls as Pt rises), so flip.
+    if log_ber[0] < log_ber[-1]:
+        xp, fp = log_ber, pt_v
+    else:
+        xp, fp = log_ber[::-1], pt_v[::-1]
+
+    target_log = np.log10(target_ber)
+    if target_log < xp[0] or target_log > xp[-1]:
+        return None  # target BER outside the simulated/interpolatable range
+
+    return float(np.interp(target_log, xp, fp))
+
+
+curves_by_label = {
+    "QPSA (M=4)": curve_qpsa,
+    "MPS (M=4, N=8)": curve_mps,
+    "SBF (M=4)": curve_sbf4,
+    "Perfect CSI (M=4)": curve_csi4,
+    "SBF (M=128)": curve_sbf128,
+    "Perfect CSI (M=128)": curve_csi128,
+}
+
+pt_required = {
+    label: pt_at_target_ber(curve_df, TARGET_BER)
+    for label, curve_df in curves_by_label.items()
+}
+
+print(f"\nTransmit power (dBm) required to reach BER = {TARGET_BER:.0e}:")
+for label, pt_val in pt_required.items():
+    if pt_val is None:
+        print(f"  {label:22s}: BER={TARGET_BER:.0e} not reached within simulated Pt range")
+    else:
+        print(f"  {label:22s}: Pt = {pt_val:6.3f} dBm")
+
+# ============================================================
+# 12. GAIN AT BER = 1e-3 WITH A 95% CONFIDENCE INTERVAL
+#     (paired bootstrap over the NUM_RUNS channel realizations)
+# ============================================================
+# QPSA, MPS, SBF(M=4) and Perfect-CSI(M=4) all reuse the SAME
+# underlying channel draws (h_sr, h_st, h_tr, h_si_4, h_ir_4), so a
+# fair comparison must preserve that pairing rather than treating
+# the curves as independent. We resample realization INDICES once
+# per bootstrap draw and apply that same index set to every curve's
+# per-realization BER, which cancels shared channel-realization
+# noise out of the *difference* and yields a tighter, correctly-
+# paired confidence interval on the gain itself (not just on each
+# curve separately, as Section 9's per-point CI95 already gives).
+# ============================================================
+
+N_BOOT = 5000
+BOOTSTRAP_SEED = 123
+boot_rng = np.random.default_rng(BOOTSTRAP_SEED)
+
+# Per-realization BER matrices, shape (num_Pt_points, NUM_RUNS).
+ber_matrices = {
+    method_name: conditional_bpsk_ber(rho_lin[:, None], gain_arr[None, :])
+    for method_name, gain_arr in method_gains.items()
+}
+
+label_to_method = {
+    "QPSA (M=4)": "QPSA_M4_D2",
+    "MPS (M=4, N=8)": "MPS_M4_N8",
+    "SBF (M=4)": "SBF_M4",
+    "Perfect CSI (M=4)": "Perfect_CSI_M4",
+    "SBF (M=128)": "SBF_M128",
+    "Perfect CSI (M=128)": "Perfect_CSI_M128",
+}
+
+
+def pt_at_target_ber_arrays(pt_arr, ber_arr, target_ber):
+    """Same interpolation as pt_at_target_ber(), but on raw arrays
+    (used inside the bootstrap loop, where we resample the BER
+    curve directly rather than rebuilding a DataFrame each time)."""
+    valid = np.isfinite(ber_arr) & (ber_arr > 0)
+    pt_v = pt_arr[valid]
+    ber_v = ber_arr[valid]
+
+    order = np.argsort(pt_v)
+    pt_v = pt_v[order]
+    ber_v = ber_v[order]
+
+    log_ber = np.log10(ber_v)
+
+    if log_ber[0] < log_ber[-1]:
+        xp, fp = log_ber, pt_v
+    else:
+        xp, fp = log_ber[::-1], pt_v[::-1]
+
+    target_log = np.log10(target_ber)
+    if target_log < xp[0] or target_log > xp[-1]:
+        return np.nan
+    return float(np.interp(target_log, xp, fp))
+
+
+def bootstrap_gain_distribution(label_a, label_b, n_boot, target_ber):
+    """Bootstrap distribution of gain_dB = Pt_required(A) - Pt_required(B).
+    Positive means B needs LESS transmit power than A at the target BER
+    (i.e. B has an SNR gain over A)."""
+    mat_a = ber_matrices[label_to_method[label_a]]
+    mat_b = ber_matrices[label_to_method[label_b]]
+    n_runs = mat_a.shape[1]
+
+    gains = np.empty(n_boot)
+    for b in range(n_boot):
+        idx = boot_rng.integers(0, n_runs, size=n_runs)
+        mean_ber_a = mat_a[:, idx].mean(axis=1)
+        mean_ber_b = mat_b[:, idx].mean(axis=1)
+
+        pt_a = pt_at_target_ber_arrays(Pt_dBm, mean_ber_a, target_ber)
+        pt_b = pt_at_target_ber_arrays(Pt_dBm, mean_ber_b, target_ber)
+
+        gains[b] = pt_a - pt_b
+
+    return gains
+
+
+GAIN_PAIRS = [
+    ("MPS (M=4, N=8)", "SBF (M=4)"),
+    ("QPSA (M=4)", "SBF (M=4)"),
+    ("Perfect CSI (M=4)", "SBF (M=4)"),
+    ("Perfect CSI (M=4)", "QPSA (M=4)"),
+]
+
+gain_ci_rows = []
+
+print(f"\nSNR gain at BER = {TARGET_BER:.0e}, with 95% CI "
+      f"(paired bootstrap, N_BOOT={N_BOOT}):")
+
+for label_a, label_b in GAIN_PAIRS:
+    gains = bootstrap_gain_distribution(label_a, label_b, N_BOOT, TARGET_BER)
+    gains = gains[np.isfinite(gains)]
+
+    point_estimate = pt_required[label_a] - pt_required[label_b]
+    boot_mean = float(np.mean(gains))
+    ci_low, ci_high = np.percentile(gains, [2.5, 97.5])
+
+    print(f"\n  {label_b} vs {label_a}:")
+    print(f"    Point estimate : {point_estimate:+.3f} dB")
+    print(f"    Bootstrap mean : {boot_mean:+.3f} dB  "
+          f"(n_valid={gains.size}/{N_BOOT})")
+    print(f"    95% CI         : [{ci_low:+.3f}, {ci_high:+.3f}] dB")
+
+    gain_ci_rows.append({
+        "comparison": f"{label_b}_vs_{label_a}",
+        "point_estimate_dB": point_estimate,
+        "bootstrap_mean_dB": boot_mean,
+        "CI95_low_dB": float(ci_low),
+        "CI95_high_dB": float(ci_high),
+        "n_valid_bootstraps": int(gains.size),
+        "n_bootstraps": N_BOOT,
+    })
+
+gain_ci_df = pd.DataFrame(gain_ci_rows)
 
 # ============================================================
 # USER-EDITABLE PLOT SETTINGS
@@ -492,9 +670,9 @@ MARK_EVERY = 2
 # Same color/marker combinations as the previous finalized Figure 7.
 # The new TVT'24 benchmark takes the previous PARAFAC style:
 # black diamond, solid line.
-TVT24_COLOR = "black"
-TVT24_MARKER = "D"
-TVT24_LINESTYLE = "-"
+QPSA_COLOR = "black"
+QPSA_MARKER = "D"
+QPSA_LINESTYLE = "-"
 
 MPS_COLOR = "red"
 MPS_MARKER = "^"
@@ -523,18 +701,18 @@ Y_LIMITS = (1e-12, 1.0)
 SHOW_CI_BANDS = False
 
 # ============================================================
-# 11. PLOT
+# 13. PLOT
 # ============================================================
 
 fig, ax = plt.subplots(figsize=(8, 6))
 
 plot_specs = [
     (
-        curve_tvt24,
+        curve_qpsa,
         r"QPSA ($M=4$)",
-        TVT24_COLOR,
-        TVT24_MARKER,
-        TVT24_LINESTYLE,
+        QPSA_COLOR,
+        QPSA_MARKER,
+        QPSA_LINESTYLE,
     ),
     (
         curve_mps,
@@ -612,14 +790,14 @@ ax.legend(
     edgecolor="black",
     framealpha=1.0,
     fontsize=8.5,
-    handlelength=3.2,      # <-- added: long enough handle to show dashes clearly
-    handletextpad=0.8,     # <-- added: keeps spacing tidy with the longer handle
+    handlelength=3.2,
+    handletextpad=0.8,
 )
 
 fig.tight_layout(pad=0.8)
 
 # ============================================================
-# 12. SAVE OUTPUTS — PORTABLE PATH
+# 14. SAVE OUTPUTS — PORTABLE PATH
 # ============================================================
 
 if "__file__" in globals():
@@ -627,12 +805,14 @@ if "__file__" in globals():
 else:
     base_dir = Path.cwd()
 
-output_dir = base_dir / "figure7_TVT2024_quantized_outputs"
+output_dir = base_dir / "figure7_QPSA_outputs"
 output_dir.mkdir(parents=True, exist_ok=True)
 
-png_path = output_dir / "figure7_TVT2024_quantized_benchmark_same_styles.png"
-csv_path = output_dir / "figure7_TVT2024_quantized_results.csv"
-metadata_path = output_dir / "figure7_TVT2024_quantized_metadata.json"
+png_path = output_dir / "figure7_QPSA_benchmark_same_styles.png"
+csv_path = output_dir / "figure7_QPSA_results.csv"
+wide_csv_path = output_dir / "transmit_power_vs_BER.csv"
+gain_ci_csv_path = output_dir / "gain_at_BER_1e-3_with_CI95.csv"
+metadata_path = output_dir / "figure7_QPSA_metadata.json"
 
 fig.savefig(
     png_path,
@@ -642,6 +822,22 @@ fig.savefig(
 )
 
 summary_df.to_csv(csv_path, index=False)
+
+# Wide-format CSV: one row per Pt_dBm, one BER column per method.
+wide_df = summary_df.pivot(
+    index="Pt_dBm", columns="method", values="mean_BER"
+).reset_index()
+wide_df = wide_df.rename(columns={
+    "QPSA_M4_D2": "BER_QPSA_M4",
+    "MPS_M4_N8": "BER_MPS_M4_N8",
+    "SBF_M4": "BER_SBF_M4",
+    "Perfect_CSI_M4": "BER_PerfectCSI_M4",
+    "SBF_M128": "BER_SBF_M128",
+    "Perfect_CSI_M128": "BER_PerfectCSI_M128",
+})
+wide_df.to_csv(wide_csv_path, index=False)
+
+gain_ci_df.to_csv(gain_ci_csv_path, index=False)
 
 metadata = {
     "pipeline_version": PIPELINE_VERSION,
@@ -681,11 +877,34 @@ metadata = {
         "Perfect_CSI_M128_BER_not_worse_than_SBF_M128": bool(check_csi128_vs_sbf128),
         "quantized_phases_on_D_bit_alphabet": bool(check_quantized_alphabet),
     },
+    "gain_at_target_BER": {
+        "target_BER": TARGET_BER,
+        "Pt_required_dBm": {k: v for k, v in pt_required.items()},
+        "bootstrap": {
+            "n_bootstraps": N_BOOT,
+            "seed": BOOTSTRAP_SEED,
+            "method": (
+                "Paired resampling of realization indices, applied "
+                "identically to every curve sharing the same channel "
+                "draws, then Pt-at-target-BER re-interpolated per "
+                "bootstrap replicate; 95% CI = 2.5th/97.5th percentiles "
+                "of the resulting gain distribution."
+            ),
+            "results": gain_ci_rows,
+        },
+    },
 }
 
 metadata_path.write_text(
     json.dumps(metadata, indent=2),
     encoding="utf-8",
 )
+
+print("\nSaved:")
+print(png_path.resolve())
+print(csv_path.resolve())
+print(wide_csv_path.resolve())
+print(gain_ci_csv_path.resolve())
+print(metadata_path.resolve())
 
 plt.show()
