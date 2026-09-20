@@ -1,3 +1,22 @@
+# =============================================================================
+# IRS-Assisted Backscatter Wireless Communication Simulation
+#
+# This script reproduces part of the numerical results reported in Section 5
+# of the manuscript. The system consists of a transmitter, a conventional
+# backscatter tag (Tag 1), an IRS-assisted backscatter tag (Tag 2), and a
+# receiver.
+#
+# The simulations follow the 3GPP Indoor Hotspot (InH) propagation setting
+# considered in the manuscript, with a carrier frequency of 2.4 GHz.
+# Unless otherwise stated, the main system parameters follow Table 2.
+# Parameters that are varied for a particular experiment are defined
+# separately in the corresponding section of this script.
+#
+# Random channel realizations are generated independently for Monte Carlo
+# evaluation. The generated figures correspond to those reported in the
+# revised manuscript.
+# ============================================================================
+
 from pathlib import Path
 import numpy as np
 import pandas as pd
