@@ -1,47 +1,46 @@
 # Simulation Codes for IRS-Assisted Backscatter Wireless Communication
 
-This repository contains the Python simulation codes used to generate the
-numerical results presented in our study on feedback-based phase-shift
-adjustment and noncoherent detection for Intelligent Reflecting Surface
-(IRS)-assisted backscatter wireless communication (BackWComm) networks.
+This repository contains the Python-based simulation codes used to generate the simulation results presented in our study on Phase Adjustments of Intelligent Reflecting Surface Elements in IRS-Assisted Backscatter Wireless Communication Networks. The repository is provided to support the reproducibility of the results reported in the manuscript.
 
-The repository is provided to support the reproducibility of the results
-reported in the manuscript.
+## Overview 
 
-## Overview
-
-The considered system includes a transmitter, a conventional backscatter
-tag (Tag 1), an IRS-assisted backscatter tag (Tag 2), and a receiver.
+The considered system includes a transmitter, a conventional backscatter tag (Tag 1), an IRS-assisted backscatter tag (Tag 2), and a receiver.
 
 Two feedback-based methods are evaluated for IRS phase-shift adjustment:
 
-- **Matrix of Phase-Shifts (MPS):** the receiver selects the phase-shift
-  vector that provides the highest measured SNR from a predefined codebook
-  and feeds back its index.
+- **Matrix of Phase-Shifts (MPS):** The receiver selects the phase-shift vector that provides the highest measured received SNR from a predefined MPS and feeds back its index.
 
-- **Single-Bit Feedback (SBF):** the IRS phases are iteratively perturbed,
-  and the receiver returns one feedback bit indicating whether the measured
-  SNR has improved.
+- **Single-Bit Feedback (SBF):** The IRS phase shifts are iteratively perturbed, and the receiver returns one feedback bit indicating whether the measured received SNR has improved.
 
-The repository also includes simulations for the proposed direct and
-indirect noncoherent detectors.
+The repository also includes simulations for the proposed direct and indirect noncoherent detectors.
 
 ## Simulation Setup
 
-The simulations follow the system model and parameter settings described
-in the manuscript.
+A Python-based simulation framework was developed to evaluate the proposed IRS phase-adjustment algorithms under the considered 3GPP Indoor Hotspot (InH) channel conditions. The following table summarizes the simulation parameters used in the numerical evaluations:
 
-The main simulation setting uses:
+| Parameter | Symbol | Value | Unit |
+| :--- | :---: | :---: | :---: |
+| Carrier Frequency | $f_c$ | 2.4 | GHz |
+| Transmit Power | - | 20 | dBm |
+| Receiver Noise Power | - | −95 | dBm |
+| Transmitter–Receiver Distance | - | 20 | m |
+| Transmitter–Backscatter Tag 1 Distance | - | 10 | m |
+| Backscatter Tag 1–Receiver Distance | - | 10 | m |
+| Transmitter–IRS Distance | - | 8 | m |
+| IRS–Receiver Distance | - | 12 | m |
+| Transmitter–Receiver Path Loss | - | 76.60 | dB |
+| Transmitter–Backscatter Tag 1 Path Loss | - | 65.07 | dB |
+| Backscatter Tag 1–Receiver Path Loss | - | 65.07 | dB |
+| Transmitter–IRS Path Loss | - | 55.63 | dB |
+| IRS–Receiver Path Loss | - | 58.67 | dB |
+| Reflection Coefficient | $\eta$ | 0.8 | – |
+| Number of IRS Elements | $M$ | Varied | – |
+| Total Number of Iterations of SBF Algorithm | $K$ | 100 | – |
+| SBF Perturbation Bound | $\varepsilon_m$ | $\frac{\pi}{20}$ | rad |
+| Channel Drift Bound | $\delta_m$ | $\frac{\pi}{25}$ | rad |
+| Discount Factor | $\lambda$ | 0.98 | – |
+| Number of Observations | $N_s$ | 20 | – |
 
-- Carrier frequency: **2.4 GHz**
-- 3GPP Indoor Hotspot (InH) propagation scenario
-- Transmit power: **20 dBm**
-- Receiver noise power: **-95 dBm**
-- Reflection coefficient: **0.8**
-- SBF iterations: **100**
-- SBF perturbation bound: **π/20**
-- Channel-drift bound: **π/25**
-- Discount factor: **0.98**
 
 The number of IRS elements, channel realizations, phase errors, feedback
 conditions, and other parameters are varied according to the experiment.
