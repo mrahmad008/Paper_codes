@@ -50,31 +50,33 @@ figure descriptions.
 
 ## Repository Contents
 
-The Python scripts reproduce the main numerical experiments reported in
-the manuscript, including:
+## Reproducibility: Figure and Table Mapping
 
-- validation of the Gamma approximation for the post-selection channel
-  energy;
-- SBF convergence under static channel conditions;
-- SBF tracking under time-varying channels;
-- effects of channel drift, phase-setting errors, feedback delay, and
-  reflection coefficient;
-- convergence behavior for different numbers of IRS elements;
-- BER performance of the MPS-based algorithm;
-- comparison of MPS and SBF with QPSA and perfect-CSI benchmarks;
-- effect of feedback bit errors on SBF;
-- performance of the direct and indirect noncoherent detectors; and
-- detector sensitivity to SNR-estimation and channel-statistics mismatch.
+This repository contains the Python scripts used to generate the numerical results presented in the manuscript, *Phase Adjustments of Intelligent Reflecting Surface Elements in IRS-Assisted Backscatter Wireless Communication Networks*.
 
-Comments have been added to the Python files to explain the purpose of
-each simulation, the main parameters, and the corresponding results in
-the manuscript.
+The following table maps each manuscript figure and simulation-generated table to its corresponding Python script and random seed(s).
 
-## Running the Simulations
+| Manuscript Item | Description | Python Script | Random Seed(s) |
+|---|---|---|---|
+| Figure 2 | Convergence analysis for static channels | `fig2_code.py` | 42 |
+| Figure 3 | Validation of the Gamma approximation for the post-selection channel energy | `fig3_code.py` | M = 4: 1042; M = 128: 2042 |
+| Figure 4 | SBF convergence under static channel conditions | `fig4_code.py` | 42 |
+| Figure 5 | SBF convergence under time-varying channel conditions: effects of channel drift, phase-setting errors, feedback delay, and reflection coefficient | `fig5_code.py` | 42 |
+| Figure 6 | Convergence behavior for different numbers of IRS elements | `fig6_code.py` | 42 |
+| Table 3 | SBF tracking analysis under time-varying channels | `Table3_code.py` | 42 |
+| Figure 7 | BER performance of the MPS-based algorithm | `fig7_code.py` | 42 |
+| Figure 8 | Comparison of MPS and SBF with QPSA and perfect-CSI benchmarks | `fig8_code.py` | Master seed: 42; bootstrap seed: 123 |
+| Figure 9 | Effect of feedback bit errors on SBF | `fig9_code.py` | 42 |
+| Figure 10 | Performance of the direct and indirect noncoherent detectors | `fig10_code.py` | Training: 2042; U1 testing: 7042; U0 testing: 8042; observation: 9042 |
+| Figure 11 | Detector sensitivity to SNR-estimation and channel-statistics mismatch | `fig11_code.py` | Training: 2042; U1 testing: 7042; U0 testing: 8042; observation: 9042 |
 
-The simulations were developed in Python.
+### Reproducibility Notes
 
-Run the required Python file directly, for example:
+- All random seeds are fixed to support reproducible numerical experiments.
+- Figures 10 and 11 use separate random seeds for training, testing, and observation generation.
+- Figure 8 uses an independent random seed for its paired-bootstrap confidence-interval analysis.
+- The scripts should be executed using the simulation parameters specified in the manuscript and corresponding Python files.
 
-```bash
-python filename.py
+Comments have been added to the Python files to explain the purpose of each simulation, the main parameters, and the corresponding results in the manuscript.
+
+
