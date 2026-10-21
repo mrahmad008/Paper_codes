@@ -69,6 +69,13 @@ The following table maps each manuscript figure and simulation-generated table t
 | Figure 10 | Performance of the direct and indirect noncoherent detectors | `fig10_code.py` | Training: 2042; U1 testing: 7042; U0 testing: 8042; observation: 9042 |
 | Figure 11 | Detector sensitivity to SNR-estimation and channel-statistics mismatch | `fig11_code.py` | Training: 2042; U1 testing: 7042; U0 testing: 8042; observation: 9042 |
 
+| Manuscript Item | Description | Python Script | Random Seed(s) |
+| :--- | :--- | :--- | :--- |
+| **Figure 2** | Convergence analysis for static channels | [`fig2_code.py`](fig2_code.py) | 42 |
+| **Figure 3** | Validation of the Gamma approximation | [`fig3_code.py`](fig3_code.py) | M = 4: 1042;<br>M = 128: 2042 |
+| **Figure 4** | SBF convergence under static channel conditions | [`fig4_code.py`](fig4_code.py) | 42 |
+
+
 ### Reproducibility Notes
 
 - All random seeds are fixed to support reproducible numerical experiments.
