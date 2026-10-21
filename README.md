@@ -58,16 +58,16 @@ The following table maps each manuscript figure and simulation-generated table t
 | Manuscript Item | Description | Python Script | Random Seed(s) |
 |---|---|---|---|
 | Figure 2 | Convergence analysis for static channels | [`fig2_code.py`](fig2_code.py) | 42 |
-| Figure 3 | Validation of the Gamma approximation for the post-selection channel energy | `fig3_code.py` | M = 4: 1042; M = 128: 2042 |
-| Figure 4 | SBF convergence under static channel conditions | `fig4_code.py` | 42 |
-| Figure 5 | SBF convergence under time-varying channel conditions: effects of channel drift, phase-setting errors, feedback delay, and reflection coefficient | `fig5_code.py` | 42 |
-| Figure 6 | Convergence behavior for different numbers of IRS elements | `fig6_code.py` | 42 |
-| Table 3 | SBF tracking analysis under time-varying channels | `Table3_code.py` | 42 |
-| Figure 7 | BER performance of the MPS-based algorithm | `fig7_code.py` | 42 |
-| Figure 8 | Comparison of MPS and SBF with QPSA and perfect-CSI benchmarks | `fig8_code.py` | Master seed: 42; bootstrap seed: 123 |
-| Figure 9 | Effect of feedback bit errors on SBF | `fig9_code.py` | 42 |
-| Figure 10 | Performance of the direct and indirect noncoherent detectors | `fig10_code.py` | Training: 2042; U1 testing: 7042; U0 testing: 8042; observation: 9042 |
-| Figure 11 | Detector sensitivity to SNR-estimation and channel-statistics mismatch | `fig11_code.py` | Training: 2042; U1 testing: 7042; U0 testing: 8042; observation: 9042 |
+| Figure 3 | Validation of the Gamma approximation for the post-selection channel energy | [`fig3_code.py`](fig3_code.py) | M = 4: 1042; M = 128: 2042 |
+| Figure 4 | SBF convergence under static channel conditions | [`fig4_code.py`](fig4_code.py) | 42 |
+| Figure 5 | SBF convergence under time-varying channel conditions: effects of channel drift, phase-setting errors, feedback delay, and reflection coefficient | [`fig5_code.py`](fig5_code.py) | 42 |
+| Figure 6 | Convergence behavior for different numbers of IRS elements | [`fig6_code.py`](fig6_code.py) | 42 |
+| Table 3 | SBF tracking analysis under time-varying channels | [`Table3_code.py`](Table3_code.py) | 42 |
+| Figure 7 | BER performance of the MPS-based algorithm | [`fig7_code.py`](fig7_code.py) | 42 |
+| Figure 8 | Comparison of MPS and SBF with QPSA and perfect-CSI benchmarks | [`fig8_code.py`](fig8_code.py) | Master seed: 42; bootstrap seed: 123 |
+| Figure 9 | Effect of feedback bit errors on SBF | [`fig9_code.py`](fig9_code.py) | 42 |
+| Figure 10 | Performance of the direct and indirect noncoherent detectors | [`fig10_code.py`](fig10_code.py) | Training: 2042; U1 testing: 7042; U0 testing: 8042; observation: 9042 |
+| Figure 11 | Detector sensitivity to SNR-estimation and channel-statistics mismatch | [`fig11_code.py`](fig11_code.py) | Training: 2042; U1 testing: 7042; U0 testing: 8042; observation: 9042 |
 
 ### Reproducibility Notes
 
