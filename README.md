@@ -92,7 +92,7 @@ All simulation scripts in this repository are written in Python and rely on stan
 | **Python** | `2.13.16` | Execution runtime |
 | **NumPy** | `2.1.3` | Matrix operations, complex phase math, and random channel generation |
 | **SciPy** | `1.16.3` | Gamma distribution fitting (`fig3_code.py`) and numerical integration (`fig10_code.py`, `fig11_code.py`) |
-| **Matplotlib** | `>= 3.10.0` | Generating performance curves, BER figures, and convergence plots |
+| **Matplotlib** | `3.10.0` | Generating performance curves, BER figures, and convergence plots |
 
 ### Quick Installation
 
