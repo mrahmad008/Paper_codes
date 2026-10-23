@@ -21,7 +21,6 @@ A Python-based simulation framework was developed to evaluate the proposed IRS p
 | Parameter | Symbol | Value | Unit |
 | :--- | :---: | :---: | :---: |
 | Channel Bandwidth | - | 20 | MHz |
-| Noise Spectral Density | - | -174 | dBm/Hz |
 | Receiver Noise Figure | - | 6 | dB |
 | Carrier Frequency | $f_c$ | 2.4 | GHz |
 | Transmit Power | - | 20 | dBm |
