@@ -100,4 +100,4 @@ Install all required packages in a single step via `pip`:
 
 ```bash
 pip install "numpy>=1.21.0" "scipy>=1.7.0" "matplotlib>=3.4.0"
-
+```
