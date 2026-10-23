@@ -20,6 +20,9 @@ A Python-based simulation framework was developed to evaluate the proposed IRS p
 
 | Parameter | Symbol | Value | Unit |
 | :--- | :---: | :---: | :---: |
+| Channel Bandwidth | - | 20 | MHz |
+| Noise Spectral Density | - | -174 | dBm/Hz |
+| Receiver Noise Figure | - | 6 | dB |
 | Carrier Frequency | $f_c$ | 2.4 | GHz |
 | Transmit Power | - | 20 | dBm |
 | Receiver Noise Power | - | −95 | dBm |
@@ -51,7 +54,7 @@ figure descriptions.
 
 ## Reproducibility: Figure and Table Mapping
 
-This repository contains the Python scripts used to generate the numerical results presented in the manuscript, *Phase Adjustments of Intelligent Reflecting Surface Elements in IRS-Assisted Backscatter Wireless Communication Networks*.
+This repository contains the Python scripts used to generate the numerical results presented in the manuscript, Phase-Shift Adjustments of Intelligent Reflecting Surface Elements in IRS-Assisted Backscatter Wireless Communication Networks.
 
 The following table maps each manuscript figure and simulation-generated table to its corresponding Python script and random seed(s).
 
