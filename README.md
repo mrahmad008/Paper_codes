@@ -1,6 +1,6 @@
 # Simulation Codes for IRS-Assisted Backscatter Wireless Communication
 
-This repository contains the Python-based simulation codes used to generate the simulation results presented in our study on Phase Adjustments of Intelligent Reflecting Surface Elements in IRS-Assisted Backscatter Wireless Communication Networks. The repository is provided to support the reproducibility of the results reported in the manuscript.
+This repository contains the Python-based simulation codes used to generate the simulation results presented in our study on Phase-shift Adjustments of Intelligent Reflecting Surface Elements in IRS-Assisted Backscatter Wireless Communication Networks. The repository is provided to support the reproducibility of the results reported in the manuscript.
 
 ## Overview 
 
@@ -50,8 +50,6 @@ conditions, and other parameters are varied according to the experiment.
 The corresponding values are stated in the individual Python files and
 figure descriptions.
 
-## Repository Contents
-
 ## Reproducibility: Figure and Table Mapping
 
 This repository contains the Python scripts used to generate the numerical results presented in the manuscript, Phase-Shift Adjustments of Intelligent Reflecting Surface Elements in IRS-Assisted Backscatter Wireless Communication Networks.
@@ -89,15 +87,17 @@ All simulation scripts in this repository are written in Python and rely on stan
 
 | Package / Tool | Verified Version | Purpose in Repository |
 | :--- | :---: | :--- |
-| **Python** | `2.13.16` | Execution runtime |
+| **Python** | `3.13` | Execution runtime |
 | **NumPy** | `2.1.3` | Matrix operations, complex phase math, and random channel generation |
 | **SciPy** | `1.16.3` | Gamma distribution fitting (`fig3_code.py`) and numerical integration (`fig10_code.py`, `fig11_code.py`) |
 | **Matplotlib** | `3.10.0` | Generating performance curves, BER figures, and convergence plots |
+| **pandas** | `2.2.3` | Used to organize and save results in CSV files|
+
 
 ### Quick Installation
 
 Install all required packages in a single step via `pip`:
 
 ```bash
-pip install "numpy>=1.21.0" "scipy>=1.7.0" "matplotlib>=3.4.0"
+pip install "numpy>=2.1.3" "scipy>=1.16.3" "matplotlib>=3.10.0" "pandas>=2.2.3"
 ```
