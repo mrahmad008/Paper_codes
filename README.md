@@ -81,4 +81,23 @@ The following table maps each manuscript figure and simulation-generated table t
 
 Comments have been added to the Python files to explain the purpose of each simulation, the main parameters, and the corresponding results in the manuscript.
 
+## Dependencies & Environment
+
+All simulation scripts in this repository are written in Python and rely on standard scientific computing libraries.
+
+### Core Dependencies
+
+| Package / Tool | Verified Version | Purpose in Repository |
+| :--- | :---: | :--- |
+| **Python** | `>= 3.8` | Execution runtime |
+| **NumPy** | `>= 1.21.0` | Matrix operations, complex phase math, and random channel generation |
+| **SciPy** | `>= 1.7.0` | Gamma distribution fitting (`fig3_code.py`) and numerical integration (`fig10_code.py`, `fig11_code.py`) |
+| **Matplotlib** | `>= 3.4.0` | Generating performance curves, BER figures, and convergence plots |
+
+### Quick Installation
+
+Install all required packages in a single step via `pip`:
+
+```bash
+pip install "numpy>=1.21.0" "scipy>=1.7.0" "matplotlib>=3.4.0"
 
