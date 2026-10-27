@@ -1,6 +1,3 @@
-from pathlib import Path
-import numpy as np
-import matplotlib.pyplot as plt
 
 # ============================================================
 # FIGURE 5 — DYNAMIC SBF ROBUSTNESS STUDY
@@ -14,6 +11,26 @@ import matplotlib.pyplot as plt
 #   Fig. 5(c): feedback delay
 #   Fig. 5(d): reflection magnitude / hardware loss
 # ============================================================
+
+from pathlib import Path
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+
+# ============================================================
+# MATPLOTLIB CONFIGURATION (IEEE / PUBLICATION BOLD & VECTOR PDF)
+# ============================================================
+mpl.rcParams.update({
+    "font.weight": "bold",
+    "axes.labelweight": "bold",
+    "axes.titleweight": "bold",
+    "axes.labelsize": 10,
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "mathtext.default": "regular",
+    "pdf.fonttype": 42,     # Embed TrueType fonts in PDF for vector graphics
+    "ps.fonttype": 42,
+})
 
 MASTER_SEED = 42
 master_rng = np.random.default_rng(MASTER_SEED)
@@ -483,21 +500,42 @@ X_TICK_STEP = 10
 # -----------------------------
 # Line / marker settings
 # -----------------------------
-LINE_WIDTH = 2.0
-MARKER_SIZE = 5
+LINE_WIDTH = 1.8
+MARKER_SIZE = 4.5
 MARK_EVERY = 8
 
-# Marker mapping:
-# green -> circle
-# blue  -> square
-# black -> diamond
-# red   -> triangle
 CURVE_MARKERS = [
     "o",   # circle
     "s",   # square
     "D",   # diamond
     "^",   # triangle
 ]
+
+# ------------------------------------------------------------
+# INDIVIDUAL LEGEND SETTINGS FOR EACH IMAGE / SUBPLOT
+# Preset Options: "upper left", "upper right", "lower left", "lower right", "center right", "lower center", "best"
+# Custom Coordinate Anchor: Set bbox_to_anchor=(x, y) if you want precise coordinate control, or None to use loc
+# ------------------------------------------------------------
+
+# Subplot (a): Channel-drift
+LEGEND_LOC_A = "upper left"
+LEGEND_FONT_A = 6
+LEGEND_ANCHOR_A = None     # Example: (0.4, 0.3) or None
+
+# Subplot (b): Phase-error
+LEGEND_LOC_B = "upper left"
+LEGEND_FONT_B = 7.5
+LEGEND_ANCHOR_B = None     # Example: (0.95, 0.2) or None
+
+# Subplot (c): Feedback-delay
+LEGEND_LOC_C = "upper left"
+LEGEND_FONT_C = 8
+LEGEND_ANCHOR_C = None
+
+# Subplot (d): Reflection-magnitude
+LEGEND_LOC_D = "upper left"
+LEGEND_FONT_D = 8
+LEGEND_ANCHOR_D = None
 
 # -----------------------------
 # Fig. 4(a): Channel-drift colors and legends
@@ -510,10 +548,10 @@ CHANNEL_DRIFT_COLORS = [
 ]
 
 CHANNEL_DRIFT_LEGENDS = [
-    rf"$\delta_m(k)=\pi/50$,  v={channel_drift_speed_mps[0]:.2f} m/s",
-    rf"$\delta_m(k)=\pi/25$,  v={channel_drift_speed_mps[1]:.2f} m/s",
-    rf"$\delta_m(k)= 3\pi/50$, v={channel_drift_speed_mps[2]:.2f} m/s",
-    rf"$\delta_m(k)= 2\pi/25$, v={channel_drift_speed_mps[3]:.2f} m/s",
+    rf"$\delta_m(k)=\pi/50$, v={channel_drift_speed_mps[0]:.2f} m/s",
+    rf"$\delta_m(k)=\pi/25$, v={channel_drift_speed_mps[1]:.2f} m/s",
+    rf"$\delta_m(k)=3\pi/50$, v={channel_drift_speed_mps[2]:.2f} m/s",
+    rf"$\delta_m(k)=2\pi/25$, v={channel_drift_speed_mps[3]:.2f} m/s",
 ]
 
 # -----------------------------
@@ -568,15 +606,25 @@ REFLECTION_LEGENDS = [
 ]
 
 # -----------------------------
-# Output folder (PNG only)
+# Output folder
 # -----------------------------
 output_dir = Path.cwd() / "figure4_png_results"
 output_dir.mkdir(parents=True, exist_ok=True)
 
 # ============================================================
-# Plot function for subplot
+# Plot function with individual legend controls
 # ============================================================
-def plot_family_on_axis(ax, curves, legends, colors, markers, panel_label):
+def plot_family_on_axis(
+    ax,
+    curves,
+    legends,
+    colors,
+    markers,
+    panel_label,
+    legend_loc="best",
+    legend_fontsize=8,
+    legend_anchor=None
+):
     k_axis = np.arange(K)
 
     for curve, legend, color, marker in zip(
@@ -596,8 +644,8 @@ def plot_family_on_axis(ax, curves, legends, colors, markers, panel_label):
             label=legend,
         )
 
-    ax.set_xlabel(X_LABEL)
-    ax.set_ylabel(Y_LABEL)
+    ax.set_xlabel(X_LABEL, fontweight="bold")
+    ax.set_ylabel(Y_LABEL, fontweight="bold")
 
     ax.grid(
         GRID_ON,
@@ -609,72 +657,111 @@ def plot_family_on_axis(ax, curves, legends, colors, markers, panel_label):
 
     ax.set_xticks(np.arange(0, K + 1, X_TICK_STEP))
 
-    ax.legend(
-        loc="best",
-        frameon=True,
-        edgecolor="black",
-        framealpha=1.0,
-        fontsize=8,
-    )
+    for tick in ax.get_xticklabels() + ax.get_yticklabels():
+        tick.set_fontweight("bold")
+
+    # Legend call configured per-subplot
+    legend_kwargs = {
+        "loc": legend_loc,
+        "frameon": True,
+        "edgecolor": "black",
+        "framealpha": 1.0,
+        "fontsize": legend_fontsize,
+    }
+    if legend_anchor is not None:
+        legend_kwargs["bbox_to_anchor"] = legend_anchor
+
+    legend_obj = ax.legend(**legend_kwargs)
+    legend_obj.get_frame().set_linewidth(1.0)
+    for text in legend_obj.get_texts():
+        text.set_fontweight("bold")
 
     ax.text(
-        0.5,
-        -0.22,
+        -0.05,
+        -0.05,
         panel_label,
         transform=ax.transAxes,
         ha="center",
         va="top",
-        fontsize=11
+        fontsize=11,
+        fontweight="bold"
     )
 
 # ============================================================
 # Generate ONE 2x2 combined figure
 # ============================================================
-fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+#fig, axes = plt.subplots(2, 2, figsize=(7.15, 5.2))
+fig, axes = plt.subplots(2, 2, figsize=(7.15, 4.6))
 axes = axes.flatten()
 
+# Subplot (a)
 plot_family_on_axis(
     axes[0],
     channel_drift_avg,
     CHANNEL_DRIFT_LEGENDS,
     CHANNEL_DRIFT_COLORS,
     CURVE_MARKERS,
-    "(a)"
+    "(a)",
+    legend_loc=LEGEND_LOC_A,
+    legend_fontsize=LEGEND_FONT_A,
+    legend_anchor=LEGEND_ANCHOR_A
 )
 
+# Subplot (b)
 plot_family_on_axis(
     axes[1],
     phase_error_avg,
     PHASE_ERROR_LEGENDS,
     PHASE_ERROR_COLORS,
     CURVE_MARKERS,
-    "(b)"
+    "(b)",
+    legend_loc=LEGEND_LOC_B,
+    legend_fontsize=LEGEND_FONT_B,
+    legend_anchor=LEGEND_ANCHOR_B
 )
 
+# Subplot (c)
 plot_family_on_axis(
     axes[2],
     feedback_delay_avg,
     FEEDBACK_DELAY_LEGENDS,
     FEEDBACK_DELAY_COLORS,
     CURVE_MARKERS,
-    "(c)"
+    "(c)",
+    legend_loc=LEGEND_LOC_C,
+    legend_fontsize=LEGEND_FONT_C,
+    legend_anchor=LEGEND_ANCHOR_C
 )
 
+# Subplot (d)
 plot_family_on_axis(
     axes[3],
     reflection_magnitude_avg,
     REFLECTION_LEGENDS,
     REFLECTION_COLORS,
     CURVE_MARKERS,
-    "(d)"
+    "(d)",
+    legend_loc=LEGEND_LOC_D,
+    legend_fontsize=LEGEND_FONT_D,
+    legend_anchor=LEGEND_ANCHOR_D
 )
 
-fig.tight_layout()
 
-save_path = output_dir / "figure4_combined_2x2.png"
+fig.tight_layout(pad=0.8)
+
+save_path_png = output_dir / "figure4_combined_2x2.png"
+save_path_pdf = output_dir / "figure4_combined_2x2.pdf"
+
 fig.savefig(
-    save_path,
+    save_path_png,
     dpi=600,
+    bbox_inches="tight",
+    facecolor="white",
+)
+
+fig.savefig(
+    save_path_pdf,
+    format="pdf",
     bbox_inches="tight",
     facecolor="white",
 )
@@ -682,4 +769,6 @@ fig.savefig(
 plt.show()
 
 print("PNG figure saved in:")
-print(save_path)
+print(save_path_png)
+print("PDF figure saved in:")
+print(save_path_pdf)
