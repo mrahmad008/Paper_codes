@@ -35,15 +35,34 @@
 
 from pathlib import Path
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 
+# ============================================================
+# MATPLOTLIB CONFIGURATION (IEEE SINGLE-COLUMN BOLD)
+# ============================================================
+
+mpl.rcParams.update({
+    "font.weight": "bold",
+    "axes.labelweight": "bold",
+    "axes.titleweight": "bold",
+    "axes.labelsize": 9,
+    "xtick.labelsize": 8,
+    "ytick.labelsize": 8,
+    "legend.fontsize": 9.5,
+    "mathtext.default": "regular",
+    "pdf.fonttype": 42,     # Embed TrueType fonts in PDF
+    "ps.fonttype": 42,
+})
+
+
+# ============================================================
+# FIGURE 4 — STATIC SBF CONVERGENCE
+# ============================================================
 
 SEED = 42
 rng = np.random.default_rng(SEED)
 
-# -----------------------------
-# Manuscript / algorithm settings
-# -----------------------------
 M = 128
 K = 100
 
@@ -54,36 +73,28 @@ eta = 0.8
 epsilon_low = -np.pi / 20.0
 epsilon_high = np.pi / 20.0
 
-# -----------------------------
-# Latest indoor physical parameters
-# -----------------------------
 carrier_frequency_GHz = 2.4
 
 ambient_source_power_dBm = 20.0
 ambient_noise_power_dBm = -95.0
 
-# Manuscript definition:
-# rho is the average transmit SNR.
-# Keep rho explicit in the simulation rather than deriving it
 rho_dB = ambient_source_power_dBm - ambient_noise_power_dBm
 rho = 10.0 ** (rho_dB / 10.0)
 
-# Distances
 source_to_receiver_distance_m = 20.0
 source_to_conventional_tag_distance_m = 10.0
 conventional_tag_to_receiver_distance_m = 10.0
 source_to_irs_distance_m = 8.0
 irs_to_receiver_distance_m = 12.0
 
-# -----------------------------
-# 3GPP TR 38.901 InH path loss
-# -----------------------------
+
 def indoor_los_path_loss_dB(distance_m, frequency_GHz):
     return (
         32.4
         + 17.3 * np.log10(distance_m)
         + 20.0 * np.log10(frequency_GHz)
     )
+
 
 def indoor_nlos_path_loss_dB(distance_m, frequency_GHz):
     los = indoor_los_path_loss_dB(distance_m, frequency_GHz)
@@ -94,48 +105,40 @@ def indoor_nlos_path_loss_dB(distance_m, frequency_GHz):
     )
     return max(los, nlos_candidate)
 
-# NLOS for source->receiver and conventional-tag links
+
 source_to_receiver_PL_dB = indoor_nlos_path_loss_dB(
-    source_to_receiver_distance_m,
-    carrier_frequency_GHz
+    source_to_receiver_distance_m, carrier_frequency_GHz
 )
 
 source_to_conventional_tag_PL_dB = indoor_nlos_path_loss_dB(
-    source_to_conventional_tag_distance_m,
-    carrier_frequency_GHz
+    source_to_conventional_tag_distance_m, carrier_frequency_GHz
 )
 
 conventional_tag_to_receiver_PL_dB = indoor_nlos_path_loss_dB(
-    conventional_tag_to_receiver_distance_m,
-    carrier_frequency_GHz
+    conventional_tag_to_receiver_distance_m, carrier_frequency_GHz
 )
 
-# LOS path-loss cases for IRS-associated links
 source_to_irs_PL_dB = indoor_los_path_loss_dB(
-    source_to_irs_distance_m,
-    carrier_frequency_GHz
+    source_to_irs_distance_m, carrier_frequency_GHz
 )
 
 irs_to_receiver_PL_dB = indoor_los_path_loss_dB(
-    irs_to_receiver_distance_m,
-    carrier_frequency_GHz
+    irs_to_receiver_distance_m, carrier_frequency_GHz
 )
 
-# Existing manuscript Rayleigh variances
 source_to_receiver_variance = 10.0 ** (-source_to_receiver_PL_dB / 10.0)
 source_to_conventional_tag_variance = 10.0 ** (-source_to_conventional_tag_PL_dB / 10.0)
 conventional_tag_to_receiver_variance = 10.0 ** (-conventional_tag_to_receiver_PL_dB / 10.0)
 source_to_irs_variance = 10.0 ** (-source_to_irs_PL_dB / 10.0)
 irs_to_receiver_variance = 10.0 ** (-irs_to_receiver_PL_dB / 10.0)
 
-# -----------------------------
-# CSCG / Rayleigh generators
-# -----------------------------
+
 def cn_scalar(variance):
     return np.sqrt(variance / 2.0) * (
         rng.standard_normal()
         + 1j * rng.standard_normal()
     )
+
 
 def cn_vector(variance, size):
     return np.sqrt(variance / 2.0) * (
@@ -143,32 +146,14 @@ def cn_vector(variance, size):
         + 1j * rng.standard_normal(size)
     )
 
-# -----------------------------
-# ONE common static channel realization
-# -----------------------------
-source_to_receiver_channel = cn_scalar(
-    source_to_receiver_variance
-)
 
-source_to_conventional_tag_channel = cn_scalar(
-    source_to_conventional_tag_variance
-)
+source_to_receiver_channel = cn_scalar(source_to_receiver_variance)
+source_to_conventional_tag_channel = cn_scalar(source_to_conventional_tag_variance)
+conventional_tag_to_receiver_channel = cn_scalar(conventional_tag_to_receiver_variance)
 
-conventional_tag_to_receiver_channel = cn_scalar(
-    conventional_tag_to_receiver_variance
-)
+source_to_irs_channel = cn_vector(source_to_irs_variance, M)
+irs_to_receiver_channel = cn_vector(irs_to_receiver_variance, M)
 
-source_to_irs_channel = cn_vector(
-    source_to_irs_variance,
-    M
-)
-
-irs_to_receiver_channel = cn_vector(
-    irs_to_receiver_variance,
-    M
-)
-
-# Manuscript non-IRS component
 C = (
     source_to_receiver_channel
     + source_to_conventional_tag_channel
@@ -177,9 +162,7 @@ C = (
     * conventional_tag_to_receiver_channel
 )
 
-# -----------------------------
-# Static SBF
-# -----------------------------
+
 def simulate_static_sbf(initial_phases):
     phi_best = initial_phases.copy()
 
@@ -189,23 +172,14 @@ def simulate_static_sbf(initial_phases):
         * source_to_irs_channel
     )
 
-    G = (
-        C
-        + eta * irs_sum * x
-    )
-
+    G = C + eta * irs_sum * x
     gamma_best = rho * np.abs(G) ** 2
 
     gamma_history = np.zeros(K)
     gamma_history[0] = gamma_best
 
     for k in range(1, K):
-        epsilon = rng.uniform(
-            epsilon_low,
-            epsilon_high,
-            M
-        )
-
+        epsilon = rng.uniform(epsilon_low, epsilon_high, M)
         phi_trial = phi_best + epsilon
 
         irs_sum_trial = np.sum(
@@ -214,11 +188,7 @@ def simulate_static_sbf(initial_phases):
             * source_to_irs_channel
         )
 
-        G_trial = (
-            C
-            + eta * irs_sum_trial * x
-        )
-
+        G_trial = C + eta * irs_sum_trial * x
         gamma_trial = rho * np.abs(G_trial) ** 2
 
         if gamma_trial > gamma_best:
@@ -229,24 +199,25 @@ def simulate_static_sbf(initial_phases):
 
     return gamma_history
 
-# Algorithm-1-consistent initialization
+
 phi_initial_1 = rng.uniform(-np.pi, np.pi, M)
 phi_initial_2 = rng.uniform(-np.pi, np.pi, M)
 
 gamma_1 = simulate_static_sbf(phi_initial_1)
 gamma_2 = simulate_static_sbf(phi_initial_2)
 
-# -----------------------------
-# Plot
-# -----------------------------
-fig, ax = plt.subplots(figsize=(8, 5))
 
-# Original color convention requested by user
+# ============================================================
+# IEEE SINGLE-COLUMN FIGURE GENERATION (3.4 in x 3.1 in)
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(3.5, 2.5))
+
 ax.plot(
     np.arange(K),
     gamma_1,
     color="blue",
-    linewidth=2.0,
+    linewidth=1.4,
     label="Instance 1"
 )
 
@@ -254,53 +225,52 @@ ax.plot(
     np.arange(K),
     gamma_2,
     color="red",
-    linewidth=2.0,
+    linewidth=1.4,
     label="Instance 2"
 )
 
-ax.set_xlabel(r"Number of iterations ($k$)")
-ax.set_ylabel(r"Received SNR ($\gamma$)")
-ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.6)
+# Bold Axis Labels
+ax.set_xlabel("Number of Iterations ($k$)", fontweight='bold')
+ax.set_ylabel("Received SNR ($\gamma$)", fontweight='bold')
 
+ax.set_xlim(0, K)
+ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5)
+
+# Bold Tick Labels (Axes Values)
+for tick in ax.get_xticklabels() + ax.get_yticklabels():
+    tick.set_fontweight("bold")
+
+# Bold Legend Box and Labels
 legend = ax.legend(
+    loc="upper left",
     frameon=True,
     fancybox=False,
-    edgecolor="black"
+    edgecolor="black",
+    framealpha=1.0,
+    handlelength=2.2,
+    handletextpad=0.4,
+    borderpad=0.4,
 )
-legend.get_frame().set_facecolor("white")
 
-fig.tight_layout()
+legend.get_frame().set_linewidth(1.2)
+for text in legend.get_texts():
+    text.set_fontweight("bold")
 
-# -----------------------------
-# Portable output folder
-# -----------------------------
-output_dir = Path.cwd() / "figure3_latest_2p4GHz_indoor"
+fig.tight_layout(pad=0.4)
+
+
+# ============================================================
+# SAVE RESULTS
+# ============================================================
+
+output_dir = Path.cwd() / "figure4_bold_outputs"
 output_dir.mkdir(parents=True, exist_ok=True)
 
-png_path = output_dir / "figure3_static_SBF_2p4GHz_indoor.png"
+pdf_path = output_dir / "Figure4_static_SBF_IEEE_bold.pdf"
+png_path = output_dir / "Figure4_static_SBF_IEEE_bold.png"
 
-fig.savefig(
-    png_path,
-    dpi=600,
-    bbox_inches="tight",
-    facecolor="white"
-)
+fig.savefig(pdf_path, format="pdf", bbox_inches="tight", facecolor="white")
+fig.savefig(png_path, dpi=600, bbox_inches="tight", facecolor="white")
 
-
-print("=" * 70)
-print("FIGURE 3 — LATEST 2.4 GHz INDOOR BASELINE")
-print("=" * 70)
-print(f"rho = {rho_dB:.2f} dB")
-print(f"Source -> receiver path loss = {source_to_receiver_PL_dB:.3f} dB")
-print(f"Source -> conventional tag path loss = {source_to_conventional_tag_PL_dB:.3f} dB")
-print(f"Conventional tag -> receiver path loss = {conventional_tag_to_receiver_PL_dB:.3f} dB")
-print(f"Source -> IRS path loss = {source_to_irs_PL_dB:.3f} dB")
-print(f"IRS -> receiver path loss = {irs_to_receiver_PL_dB:.3f} dB")
-print()
-print(f"Instance 1: {gamma_1[0]:.6f} -> {gamma_1[-1]:.6f}")
-print(f"Instance 2: {gamma_2[0]:.6f} -> {gamma_2[-1]:.6f}")
-print()
-print(f"PNG: {png_path}")
-print("=" * 70)
-
+print(f"Bold IEEE Vector PDF saved to: {pdf_path}")
 plt.show()
