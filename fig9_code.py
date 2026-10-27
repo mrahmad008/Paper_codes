@@ -15,13 +15,26 @@
 from pathlib import Path
 import csv
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from PIL import Image
 
 # ============================================================
-# SBF FEEDBACK BIT-FLIP ROBUSTNESS
-# Updated to the physical simulation parameters used in the paper
+# MATPLOTLIB CONFIGURATION (IEEE SINGLE-COLUMN BOLD)
 # ============================================================
+
+mpl.rcParams.update({
+    "font.weight": "bold",
+    "axes.labelweight": "bold",
+    "axes.titleweight": "bold",
+    "axes.labelsize": 9,
+    "xtick.labelsize": 8,
+    "ytick.labelsize": 8,
+    "legend.fontsize": 10,
+    "mathtext.default": "regular",
+    "pdf.fonttype": 42,     # Embed TrueType fonts in PDF
+    "ps.fonttype": 42,
+})
 
 # ============================================================
 # 1. REPRODUCIBILITY / ALGORITHM PARAMETERS
@@ -140,7 +153,7 @@ def generate_trial_inputs(seed):
 
     initial_phases = rng.uniform(
         -np.pi,
-         np.pi,
+        np.pi,
         M
     )
 
@@ -385,48 +398,17 @@ with csv_file.open(
 
 
 # ============================================================
-# 10. PUBLICATION-QUALITY PLOT
+# 10. PUBLICATION-QUALITY PLOT (IEEE SINGLE-COLUMN BOLD)
 # ============================================================
-plt.rcParams.update({
-    "font.family": "DejaVu Sans",
-    "font.size": 10,
-    "axes.labelsize": 11,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9,
-    "legend.fontsize": 9,
-    "axes.linewidth": 0.8,
-    "xtick.major.width": 0.8,
-    "ytick.major.width": 0.8,
-    "xtick.major.size": 4,
-    "ytick.major.size": 4,
-})
+fig, ax = plt.subplots(figsize=(3.5, 2.5))
 
-fig, ax = plt.subplots(
-    figsize=(7.0, 4.5)
-)
-
-colors = [
-    "green",
-    "blue",
-    "red",
-]
-
-line_styles = [
-    "-",
-    "-",
-    "-",
-]
-
-markers = [
-    "o",
-    "s",
-    "^",
-]
+colors = ["green", "blue", "red"]
+line_styles = ["-", "-", "-"]
+markers = ["o", "s", "^"]
 
 for index, p_e in enumerate(P_E_VALUES):
 
     avg_gamma = trajectories[p_e]
-
     k_values = np.arange(K)
 
     ax.plot(
@@ -434,68 +416,52 @@ for index, p_e in enumerate(P_E_VALUES):
         avg_gamma,
         color=colors[index],
         linestyle=line_styles[index],
-        linewidth=1.8,
+        linewidth=1.4,
         marker=markers[index],
-        markersize=4.0,
+        markersize=3.5,
         markevery=10,
-        markeredgewidth=0.8,
-        label=rf"$p_e = {p_e:.2f}$",
+        label=rf"$\mathbf{{p_e = {p_e:.2f}}}$",
     )
 
-ax.set_xlabel(
-    r"Number of Iterations ($k$)"
-)
+# Bold Axis Labels
+ax.set_xlabel(r"Number of Iterations ($k$)", fontweight='bold')
+ax.set_ylabel(r"Received SNR ($\gamma$)", fontweight='bold')
 
-ax.set_ylabel(
-    r"Received SNR ($\gamma$)"
-)
+ax.set_xlim(0, K)
+ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5)
 
-ax.tick_params(
-    axis="both",
-    which="major",
-    direction="in",
-    length=4,
-    width=0.8,
-)
+# Bold Tick Labels (Axes Values)
+for tick in ax.get_xticklabels() + ax.get_yticklabels():
+    tick.set_fontweight("bold")
 
 ax.minorticks_on()
 
-ax.tick_params(
-    axis="both",
-    which="minor",
-    direction="in",
-    length=2.5,
-    width=0.6,
-)
-
-ax.grid(
-    True,
-    which="major",
-    linestyle=":",
-    linewidth=0.6,
-    alpha=0.5,
-)
-
+# Bold Legend Box and Labels
 legend = ax.legend(
     loc="best",
     frameon=True,
     fancybox=False,
     edgecolor="black",
     framealpha=1.0,
-    borderpad=0.5,
-    handlelength=2.5,
+    borderpad=0.4,
+    handlelength=2.2,
+    handletextpad=0.4,
 )
 
-legend.get_frame().set_facecolor("white")
-legend.get_frame().set_alpha(1.0)
+legend.get_frame().set_linewidth(1.2)
+for text in legend.get_texts():
+    text.set_fontweight("bold")
 
-fig.tight_layout(
-    pad=0.8
-)
+fig.tight_layout(pad=0.4)
 
-png_file = (
-    OUTPUT_DIR
-    / "sbf_feedback_bitflip_convergence_M128.png"
+pdf_file = OUTPUT_DIR / "sbf_feedback_bitflip_convergence_M128.pdf"
+png_file = OUTPUT_DIR / "sbf_feedback_bitflip_convergence_M128.png"
+
+fig.savefig(
+    pdf_file,
+    format="pdf",
+    bbox_inches="tight",
+    facecolor="white",
 )
 
 fig.savefig(
@@ -517,8 +483,8 @@ print()
 print("============================================================")
 print("OUTPUT FILES")
 print("============================================================")
-print(f"PNG  : {png_file}")
-print(f"CSV  : {csv_file}")
+print(f"PNG : {png_file}")
+print(f"CSV : {csv_file}")
 print(f"Image size : {img.size}")
 print(f"Color mode : {img.mode}")
 print(f"DPI        : {img.info.get('dpi', 'Not stored')}")
