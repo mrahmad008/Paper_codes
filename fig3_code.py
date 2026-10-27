@@ -1,22 +1,26 @@
-# -----------------------------------------------------------------------------
-# Gamma approximation validation - Fig. 3
-#
-# This simulation examines the statistical distribution of the post-selection
-# composite channel energy under H1 after SBF phase adjustment.
-#
-# The normalized channel energy U1/sigma_hsr^2 is evaluated for M = 4 and
-# M = 128 IRS elements using 50,000 simulated samples. A Gamma distribution
-# is fitted using moment matching and compared with the empirical samples
-# through histograms and Q-Q plots.
-#
-# The purpose of this experiment is to verify the Gamma approximation used
-# in the design of the noncoherent detectors.
-# -----------------------------------------------------------------------------
 from pathlib import Path
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from scipy.stats import gamma as gamma_dist
 from scipy.stats import kstest
+
+# ============================================================
+# MATPLOTLIB CONFIGURATION
+# ============================================================
+
+mpl.rcParams.update({
+    "font.weight": "bold",
+    "axes.labelweight": "bold",
+    "axes.titleweight": "bold",
+    "axes.labelsize": 11,
+    "xtick.labelsize": 8,
+    "ytick.labelsize": 8,
+    "legend.fontsize": 9,
+    "mathtext.default": "regular",
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
+})
 
 # ============================================================
 # 1. OUTPUT / REPRODUCIBILITY
@@ -34,7 +38,6 @@ NUM_SAMPLES = 50_000
 BATCH_SIZE = 2_000
 M_VALUES = [4, 128]
 
-# Keep the previously used validation seeds for reproducibility.
 SEEDS = {
     4: 1042,
     128: 2042,
@@ -56,7 +59,6 @@ conventional_tag_to_receiver_distance_m = 10.0
 source_to_irs_distance_m = 8.0
 irs_to_receiver_distance_m = 12.0
 
-# SBF settings
 SBF_ITERATIONS = 100
 SBF_EPS_LOW = -np.pi / 20.0
 SBF_EPS_HIGH = np.pi / 20.0
@@ -72,18 +74,14 @@ def indoor_los_path_loss_dB(distance_m, frequency_GHz):
         + 20.0 * np.log10(frequency_GHz)
     )
 
-
 def indoor_nlos_path_loss_dB(distance_m, frequency_GHz):
     los = indoor_los_path_loss_dB(distance_m, frequency_GHz)
-
     nlos_candidate = (
         17.30
         + 38.3 * np.log10(distance_m)
         + 24.9 * np.log10(frequency_GHz)
     )
-
     return max(los, nlos_candidate)
-
 
 PL_sr = indoor_nlos_path_loss_dB(
     source_to_receiver_distance_m,
@@ -116,7 +114,6 @@ sigma_htr2 = 10.0 ** (-PL_tr / 10.0)
 sigma_hsi2 = 10.0 ** (-PL_si / 10.0)
 sigma_hir2 = 10.0 ** (-PL_ir / 10.0)
 
-# Normalize only for numerical readability / presentation.
 u_ref = sigma_hsr2
 
 # ============================================================
@@ -148,7 +145,6 @@ def generate_post_sbf_batch(rng, batch_size, M):
 
     cascaded_term = h_ir * h_si
 
-    # Random phase initialization
     phi = rng.uniform(
         -np.pi,
         np.pi,
@@ -169,7 +165,6 @@ def generate_post_sbf_batch(rng, batch_size, M):
 
     gain_best = np.abs(G) ** 2
 
-    # SBF phase-selection iterations
     for _ in range(SBF_ITERATIONS):
         epsilon = rng.uniform(
             SBF_EPS_LOW,
@@ -253,10 +248,6 @@ def fit_gamma_moments(samples):
 results = {}
 
 for M in M_VALUES:
-    print(
-        f"Generating {NUM_SAMPLES:,} post-SBF realizations for M={M}..."
-    )
-
     samples = generate_post_sbf_samples(
         M,
         NUM_SAMPLES,
@@ -327,47 +318,41 @@ for M in M_VALUES:
 # 8. PUBLICATION PLOT SETTINGS
 # ============================================================
 
-# Four panels arranged as a 2 x 2 publication figure.
-FIGSIZE = (10.0, 8.0)
+FIGSIZE = (7.15, 4.6)
 
-# Keep the same color combination as the original figure.
 HIST_COLOR = "#1f77b4"
 HIST_ALPHA = 0.55
 HIST_EDGE_COLOR = "#1f77b4"
 HIST_EDGE_WIDTH = 0.25
 
-# Fitted Gamma curve
 GAMMA_COLOR = "green"
-GAMMA_LINEWIDTH = 2.0
+GAMMA_LINEWIDTH = 1.8
 
-# Q-Q plot
 QQ_POINT_COLOR = "#1f77b4"
-QQ_POINT_SIZE = 14
+QQ_POINT_SIZE = 12
 QQ_REF_COLOR = "#1f77b4"
 QQ_REF_STYLE = "--"
-QQ_REF_WIDTH = 1.5
+QQ_REF_WIDTH = 1.4
 
 GRID_STYLE = "--"
-GRID_ALPHA = 0.32
+GRID_ALPHA = 0.35
 GRID_WIDTH = 0.50
 
-# Slightly larger fonts because the panels now have more space
-LABEL_FONT = 11
-TICK_FONT = 10
-LEGEND_FONT = 9
-TEXT_FONT = 9
-PANEL_FONT = 11
+LABEL_FONT = 10
+TICK_FONT = 8
+LEGEND_FONT = 7
+TEXT_FONT = 7.5
+PANEL_FONT = 10
 
 TEXT_BOX_STYLE = dict(
     facecolor="white",
     edgecolor="black",
-    boxstyle="square,pad=0.22",
+    boxstyle="square,pad=0.20",
     alpha=0.92,
-    linewidth=0.7,
+    linewidth=0.6,
 )
 
-OUTPUT_FILE_NAME = "gamma_validation_M4_M128_2x2_paper.png"
-
+OUTPUT_FILE_NAME = "gamma_validation_M4_M128_2x2_paper.pdf"
 
 # ============================================================
 # 9. CREATE 2 x 2 PUBLICATION FIGURE
@@ -376,27 +361,10 @@ OUTPUT_FILE_NAME = "gamma_validation_M4_M128_2x2_paper.png"
 fig, axes = plt.subplots(
     2,
     2,
-    figsize=(10, 8)
+    figsize=FIGSIZE
 )
 
 axes = axes.flatten()
-# Convert 2-D axes array into a simple sequence
-axes = axes.flatten()
-
-# Tighten horizontal gap (side-by-side look); vertical gap is set
-# generously below because the panel labels are placed under each
-# row and must clear the row underneath.
-fig.subplots_adjust(wspace=0.06, hspace=0.30)
-
-
-# ------------------------------------------------------------
-# Panel order:
-#
-# (a) M = 4   : PDF
-# (b) M = 4   : Q-Q
-# (c) M = 128 : PDF
-# (d) M = 128 : Q-Q
-# ------------------------------------------------------------
 
 subplot_order = [
     (4, "pdf"),
@@ -405,14 +373,12 @@ subplot_order = [
     (128, "qq"),
 ]
 
-
 panel_labels = {
-    (4, "pdf"): r"(a)",
-    (4, "qq"): r"(b)",
-    (128, "pdf"): r"(c)",
-    (128, "qq"): r"(d)",
+    (4, "pdf"): "(a)",
+    (4, "qq"): "(b)",
+    (128, "pdf"): "(c)",
+    (128, "qq"): "(d)",
 }
-
 
 # ============================================================
 # CREATE PANELS
@@ -428,11 +394,6 @@ for ax, (M, plot_type) in zip(
     theta_g = results[M]["theta_g"]
     ks_D = results[M]["ks_D"]
     qq_rmse = results[M]["qq_rmse"]
-
-
-    # ========================================================
-    # PDF / HISTOGRAM PANEL
-    # ========================================================
 
     if plot_type == "pdf":
 
@@ -456,11 +417,6 @@ for ax, (M, plot_type) in zip(
             scale=theta_g,
         )
 
-
-        # ----------------------------------------------------
-        # Empirical histogram
-        # ----------------------------------------------------
-
         ax.hist(
             samples,
             bins=80,
@@ -472,11 +428,6 @@ for ax, (M, plot_type) in zip(
             label="Empirical histogram",
         )
 
-
-        # ----------------------------------------------------
-        # Gamma PDF
-        # ----------------------------------------------------
-
         ax.plot(
             x_grid,
             gamma_pdf,
@@ -485,19 +436,17 @@ for ax, (M, plot_type) in zip(
             label="Moment-matched Gamma PDF",
         )
 
-
-        # ----------------------------------------------------
-        # Axis labels
-        # ----------------------------------------------------
-
         ax.set_xlabel(
             r"$U_1/\sigma_{h_{sr}}^2$",
             fontsize=LABEL_FONT,
+            fontweight="bold",
+            labelpad=2,
         )
 
         ax.set_ylabel(
             "Probability Density",
             fontsize=LABEL_FONT,
+            fontweight="bold",
         )
 
         ax.set_xlim(
@@ -505,47 +454,17 @@ for ax, (M, plot_type) in zip(
             x_max,
         )
 
-
-        # ----------------------------------------------------
-        # Statistical information
-        # ----------------------------------------------------
-
-        text_string = (
-            rf"$\alpha_g={alpha_g:.4f}$"
-            "\n"
-            rf"$\theta_g={theta_g:.4f}$"
-            "\n"
-            rf"$D_{{\mathrm{{KS}}}}={ks_D:.4f}$"
-        )
-
-        ax.text(
-            0.97,
-            0.96,
-            text_string,
-            transform=ax.transAxes,
-            ha="right",
-            va="top",
-            fontsize=TEXT_FONT,
-            bbox=TEXT_BOX_STYLE,
-        )
-
-
-        # ----------------------------------------------------
-        # Legend
-        # ----------------------------------------------------
-
-        ax.legend(
-            loc="center right",
+        # Legend moved to upper right (top right corner)
+        legend = ax.legend(
+            loc="upper right",
             frameon=True,
             edgecolor="black",
             framealpha=1.0,
             fontsize=LEGEND_FONT,
         )
-
-
-    # ========================================================
-    # Q-Q PANEL
-    # ========================================================
+        legend.get_frame().set_linewidth(0.8)
+        for text in legend.get_texts():
+            text.set_fontweight("bold")
 
     else:
 
@@ -556,7 +475,6 @@ for ax, (M, plot_type) in zip(
         theoretical_quantiles = results[M][
             "theoretical_quantiles"
         ]
-
 
         lower = float(
             min(
@@ -572,11 +490,6 @@ for ax, (M, plot_type) in zip(
             )
         )
 
-
-        # ----------------------------------------------------
-        # Empirical Q-Q points
-        # ----------------------------------------------------
-
         ax.scatter(
             theoretical_quantiles,
             empirical_quantiles,
@@ -584,11 +497,6 @@ for ax, (M, plot_type) in zip(
             color=QQ_POINT_COLOR,
             label="Empirical quantiles",
         )
-
-
-        # ----------------------------------------------------
-        # 45-degree reference
-        # ----------------------------------------------------
 
         ax.plot(
             [lower, upper],
@@ -599,19 +507,17 @@ for ax, (M, plot_type) in zip(
             label=r"$45^\circ$ reference",
         )
 
-
-        # ----------------------------------------------------
-        # Axis labels
-        # ----------------------------------------------------
-
         ax.set_xlabel(
             "Theoretical Gamma Quantiles",
             fontsize=LABEL_FONT,
+            fontweight="bold",
+            labelpad=2,
         )
 
         ax.set_ylabel(
             "Empirical Quantiles",
             fontsize=LABEL_FONT,
+            fontweight="bold",
         )
 
         ax.set_xlim(
@@ -624,52 +530,33 @@ for ax, (M, plot_type) in zip(
             upper,
         )
 
-
-        # Keep Q-Q panels approximately square
-        ax.set_aspect(
-            "equal",
-            adjustable="box",
-        )
-
-
-        # ----------------------------------------------------
-        # Statistical information
-        # ----------------------------------------------------
-
         text_string = (
-            rf"$D_{{\mathrm{{KS}}}}={ks_D:.4f}$"
-            "\n"
-            rf"Q--Q RMSE$={qq_rmse:.4f}$"
+            f"$D_\\mathrm{{KS}}={ks_D:.4f}$\n"
+            f"Q--Q RMSE={qq_rmse:.4f}"
         )
 
         ax.text(
             0.04,
-            0.96,
+            0.95,
             text_string,
             transform=ax.transAxes,
             ha="left",
             va="top",
             fontsize=TEXT_FONT,
+            fontweight="bold",
             bbox=TEXT_BOX_STYLE,
         )
 
-
-        # ----------------------------------------------------
-        # Legend
-        # ----------------------------------------------------
-
-        ax.legend(
+        legend = ax.legend(
             loc="lower right",
             frameon=True,
             edgecolor="black",
             framealpha=1.0,
             fontsize=LEGEND_FONT,
         )
-
-
-    # ========================================================
-    # COMMON PANEL FORMATTING
-    # ========================================================
+        legend.get_frame().set_linewidth(0.8)
+        for text in legend.get_texts():
+            text.set_fontweight("bold")
 
     ax.grid(
         True,
@@ -683,44 +570,40 @@ for ax, (M, plot_type) in zip(
         labelsize=TICK_FONT,
     )
 
+    for tick in ax.get_xticklabels() + ax.get_yticklabels():
+        tick.set_fontweight("bold")
 
-# ============================================================
-# PANEL LABELS — placed after layout is finalized. We use each
-# axes' TIGHT bounding box (which includes its xlabel and tick
-# labels, not just the plot rectangle) so that panels whose
-# xlabel is a tall LaTeX fraction (a, c) get the same real
-# clearance as panels with a plain one-line xlabel (b, d). The
-# aspect="equal" Q-Q panels are also handled correctly this way
-# since the tight bbox reflects their final, shrunk box.
-# ============================================================
-
-fig.canvas.draw()
-renderer = fig.canvas.get_renderer()
-
-LABEL_GAP_FIGFRAC = 0.012  # small extra gap below the tight bbox (already includes xlabel)
-
-for ax, (M, plot_type) in zip(axes, subplot_order):
-    tight_bbox = ax.get_tightbbox(renderer)
-    tight_bbox_fig = tight_bbox.transformed(fig.transFigure.inverted())
-
-    x_center = (tight_bbox_fig.x0 + tight_bbox_fig.x1) / 2.0
-    y_bottom = tight_bbox_fig.y0
-
-    fig.text(
-        x_center,
-        y_bottom - LABEL_GAP_FIGFRAC,
+    ax.text(
+        -0.1,
+        -0.1,
         panel_labels[(M, plot_type)],
+        transform=ax.transAxes,
         ha="center",
         va="top",
         fontsize=PANEL_FONT,
+        fontweight="bold",
     )
 
+fig.align_ylabels()
 
-# ============================================================
-# 10. SAVE FIGURE
-# ============================================================
+fig.subplots_adjust(
+    left=0.08,
+    right=0.98,
+    top=0.98,
+    bottom=0.10,
+    wspace=0.18,
+    hspace=0.3
+)
 
-png_path = OUT / OUTPUT_FILE_NAME
+pdf_path = OUT / OUTPUT_FILE_NAME
+png_path = OUT / OUTPUT_FILE_NAME.replace(".pdf", ".png")
+
+fig.savefig(
+    pdf_path,
+    format="pdf",
+    bbox_inches="tight",
+    facecolor="white",
+)
 
 fig.savefig(
     png_path,
@@ -729,7 +612,5 @@ fig.savefig(
     facecolor="white",
 )
 
+print(f"Bold IEEE Vector PDF saved to: {pdf_path}")
 plt.show()
-
-print("Figure saved to:")
-print(png_path)
