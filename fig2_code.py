@@ -1,6 +1,26 @@
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from scipy.special import i0e, i1e
+import pandas as pd
+from pathlib import Path
+
+# ============================================================
+# MATPLOTLIB CONFIGURATION (IEEE SINGLE-COLUMN BOLD)
+# ============================================================
+
+mpl.rcParams.update({
+    "font.weight": "bold",
+    "axes.labelweight": "bold",
+    "axes.titleweight": "bold",
+    "axes.labelsize": 9,
+    "xtick.labelsize": 8,
+    "ytick.labelsize": 8,
+    "legend.fontsize": 8,
+    "mathtext.default": "regular",
+    "pdf.fonttype": 42,     # Embed TrueType fonts in PDF
+    "ps.fonttype": 42,
+})
 
 
 # ============================================================
@@ -10,9 +30,9 @@ from scipy.special import i0e, i1e
 SEED = 42
 rng = np.random.default_rng(SEED)
 
-M = 128              # Change to 64, 128, 256, 512, etc.
-K = 100
-num_runs = 800
+M = 128              # Number of IRS elements
+K = 100              # SBF iterations
+num_runs = 800       # Monte-Carlo runs
 
 eta = 1.0
 delta = np.pi / 10
@@ -20,15 +40,9 @@ delta = np.pi / 10
 x_symbol = 1.0
 beta = 0.0
 
-# h ~ CN(0,1)
 sigma_h_ir = 1.0
 sigma_h_si = 1.0
 
-# alpha_0 = E[a_m]
-# For h_ir,h_si ~ CN(0,1):
-# E[|h|] = sqrt(pi)/2
-# Therefore:
-# E[|h_ir||h_si|] = pi/4
 alpha_0 = (
     np.pi / 4.0
     * eta
@@ -42,10 +56,6 @@ alpha_0 = (
 # ============================================================
 
 def cscg(size=None):
-    """
-    Generate circularly symmetric complex Gaussian samples
-    distributed as CN(0,1).
-    """
     return (
         rng.standard_normal(size)
         + 1j * rng.standard_normal(size)
@@ -53,42 +63,24 @@ def cscg(size=None):
 
 
 def bessel_ratio(mu):
-    """
-    Numerically stable evaluation of I1(mu)/I0(mu).
-    """
     return i1e(mu) / i0e(mu)
 
 
 def solve_mu(target):
-    """
-    Solve
-
-        I1(mu) / I0(mu) = target
-
-    for mu >= 0 using bisection.
-    """
-
     if target <= 0.0:
         return 0.0
 
     if target >= 1.0:
-        raise ValueError(
-            "Bessel-ratio target must satisfy 0 <= target < 1. "
-            f"Received target = {target}"
-        )
+        raise ValueError(f"Received target = {target}")
 
     lower = 0.0
     upper = 1.0
 
-    # Find a sufficiently large upper bound
     while bessel_ratio(upper) < target:
         upper *= 2.0
 
-    # Bisection
     for _ in range(150):
-
         mid = 0.5 * (lower + upper)
-
         if bessel_ratio(mid) < target:
             lower = mid
         else:
@@ -98,24 +90,14 @@ def solve_mu(target):
 
 
 # ============================================================
-# STORAGE
+# MONTE-CARLO SIMULATION
 # ============================================================
 
 theta_runs = []
 a_runs = []
-
 eq30_moments = []
 
-
-# ============================================================
-# MONTE-CARLO SIMULATION
-# ============================================================
-
 for run in range(num_runs):
-
-    # --------------------------------------------------------
-    # Channel realizations
-    # --------------------------------------------------------
 
     h_ir = cscg(M)
     h_si = cscg(M)
@@ -123,12 +105,6 @@ for run in range(num_runs):
     h_sr = cscg()
     h_st = cscg()
     h_tr = cscg()
-
-    # --------------------------------------------------------
-    # Non-IRS received component
-    #
-    # C = h_sr + h_st x(n) e^{j beta} h_tr
-    # --------------------------------------------------------
 
     C = (
         h_sr
@@ -138,600 +114,89 @@ for run in range(num_runs):
         * h_tr
     )
 
-    # --------------------------------------------------------
-    # IRS cascaded-channel magnitude
-    #
-    # a_m = eta |h_ir,m| |h_si,m|
-    # --------------------------------------------------------
+    a = eta * np.abs(h_ir) * np.abs(h_si)
+    channel_phase = np.angle(h_ir) + np.angle(h_si)
+    phi = rng.uniform(-np.pi, np.pi, M)
+    xi = phi + channel_phase
 
-    a = (
-        eta
-        * np.abs(h_ir)
-        * np.abs(h_si)
-    )
-
-    # --------------------------------------------------------
-    # Cascaded-channel phase
-    # --------------------------------------------------------
-
-    channel_phase = (
-        np.angle(h_ir)
-        + np.angle(h_si)
-    )
-
-    # --------------------------------------------------------
-    # Initial IRS phase shifts
-    # --------------------------------------------------------
-
-    phi = rng.uniform(
-        -np.pi,
-        np.pi,
-        M
-    )
-
-    # --------------------------------------------------------
-    # Effective received phase
-    #
-    # xi_m =
-    # phi_m
-    # + angle(h_ir,m)
-    # + angle(h_si,m)
-    # --------------------------------------------------------
-
-    xi = (
-        phi
-        + channel_phase
-    )
-
-    # IRS-assisted component
-    S = np.sum(
-        a
-        * np.exp(1j * xi)
-    )
-
-    # Complete composite magnitude
-    best_value = np.abs(
-        S + C
-    )
-
-    # ========================================================
-    # SBF ITERATIONS
-    # ========================================================
+    S = np.sum(a * np.exp(1j * xi))
+    best_value = np.abs(S + C)
 
     for k in range(K):
+        epsilon = rng.choice([-delta, delta], size=M)
+        phi_trial = phi + epsilon
+        xi_trial = phi_trial + channel_phase
 
-        # Random phase perturbation for every IRS element
-        epsilon = rng.choice(
-            [-delta, delta],
-            size=M
-        )
+        S_trial = np.sum(a * np.exp(1j * xi_trial))
+        trial_value = np.abs(S_trial + C)
 
-        phi_trial = (
-            phi
-            + epsilon
-        )
-
-        xi_trial = (
-            phi_trial
-            + channel_phase
-        )
-
-        S_trial = np.sum(
-            a
-            * np.exp(1j * xi_trial)
-        )
-
-        trial_value = np.abs(
-            S_trial + C
-        )
-
-        # Accept perturbation only when received magnitude improves
         if trial_value > best_value:
-
             phi = phi_trial
             best_value = trial_value
 
+    xi_best = phi + channel_phase
+    S_best = np.sum(a * np.exp(1j * xi_best))
+    phi0 = np.angle(S_best)
 
-    # ========================================================
-    # FINAL RELATIVE EFFECTIVE PHASE
-    # ========================================================
-
-    xi_best = (
-        phi
-        + channel_phase
-    )
-
-    S_best = np.sum(
-        a
-        * np.exp(1j * xi_best)
-    )
-
-    # Aggregate phase of the IRS-assisted component
-    phi0 = np.angle(
-        S_best
-    )
-
-    # Relative effective phase
-    theta = (
-        xi_best
-        - phi0
-    )
-
-    # Wrap theta to [-pi, pi)
-    theta = np.angle(
-        np.exp(1j * theta)
-    )
+    theta = xi_best - phi0
+    theta = np.angle(np.exp(1j * theta))
 
     theta_runs.append(theta)
     a_runs.append(a)
 
-    # ========================================================
-    # EQ. (30) ANALYTICAL FIRST MOMENT
-    # ========================================================
+    C_rot = C * np.exp(-1j * phi0)
+    radicand = max(best_value**2 - np.imag(C_rot)**2, 0.0)
 
-    # Rotate the non-IRS component by phi0
-    C_rot = (
-        C
-        * np.exp(-1j * phi0)
-    )
-
-    radicand = (
-        best_value**2
-        - np.imag(C_rot)**2
-    )
-
-    # Floating-point safeguard
-    radicand = max(
-        radicand,
-        0.0
-    )
-
-    # Eq. (30):
-    #
-    # [sqrt(y^2 - Im{Ce^-jphi0}^2)
-    #  - Re{Ce^-jphi0}]
-    # --------------------------------
-    #             alpha_0 M
-    #
-    moment_eq30 = (
-        np.sqrt(radicand)
-        - np.real(C_rot)
-    ) / (
-        alpha_0 * M
-    )
-
-    eq30_moments.append(
-        moment_eq30
-    )
+    moment_eq30 = (np.sqrt(radicand) - np.real(C_rot)) / (alpha_0 * M)
+    eq30_moments.append(moment_eq30)
 
 
 # ============================================================
-# COMBINE ALL MONTE-CARLO SAMPLES
+# COMBINE MC SAMPLES
 # ============================================================
 
-theta_all = np.concatenate(
-    theta_runs
-)
+theta_all = np.concatenate(theta_runs)
+a_all = np.concatenate(a_runs)
+eq30_moments = np.asarray(eq30_moments)
 
-a_all = np.concatenate(
-    a_runs
-)
+weights_all = a_all / np.sum(a_all)
+analytical_moment = np.mean(eq30_moments)
 
-eq30_moments = np.asarray(
-    eq30_moments
-)
+mu = solve_mu(analytical_moment)
 
 
 # ============================================================
-# AMPLITUDE-WEIGHTED EMPIRICAL DISTRIBUTION
-#
-# The empirical phase samples are weighted globally by a_m:
-#
-#           a_m
-# w_m = ------------
-#        sum_all a_m
-#
+# ANALYTICAL PDF DISTRIBUTIONS
 # ============================================================
 
-weights_all = (
-    a_all
-    / np.sum(a_all)
-)
-
-
-# ============================================================
-# DIAGNOSTIC FIRST MOMENTS
-# ============================================================
-
-# Ordinary, unweighted first trigonometric moment
-unweighted_moment = np.mean(
-    np.cos(theta_all)
-)
-
-
-# First moment of the normalized amplitude-weighted
-# empirical phase distribution
-weighted_moment = np.sum(
-    weights_all
-    * np.cos(theta_all)
-)
-
-
-# Direct empirical implementation of manuscript Eq. (25):
-#
-# E_w[cos(theta_m)]
-# =
-# E[a_m cos(theta_m)] / alpha_0
-weighted_moment_eq25 = (
-    np.mean(
-        a_all
-        * np.cos(theta_all)
-    )
-    / alpha_0
-)
-
-
-# Analytical value obtained from Eq. (30)
-analytical_moment = np.mean(
-    eq30_moments
-)
-
-
-# ============================================================
-# DEPENDENCE DIAGNOSTIC
-# ============================================================
-
-corr_a_cos = np.corrcoef(
-    a_all,
-    np.cos(theta_all)
-)[0, 1]
-
-
-# ============================================================
-# PRINT DIAGNOSTIC RESULTS
-# ============================================================
-
-print()
-print("=" * 65)
-print("FIGURE 2: PHASE-DISTRIBUTION VALIDATION")
-print("=" * 65)
-
-print(f"M                                     = {M}")
-print(f"K                                     = {K}")
-print(f"Monte-Carlo runs                      = {num_runs}")
-
-print()
-
-print(
-    "Unweighted empirical moment          = "
-    f"{unweighted_moment:.10f}"
-)
-
-print(
-    "Weighted empirical moment            = "
-    f"{weighted_moment:.10f}"
-)
-
-print(
-    "Empirical Eq. (25) weighted moment   = "
-    f"{weighted_moment_eq25:.10f}"
-)
-
-print(
-    "Analytical Eq. (30) moment           = "
-    f"{analytical_moment:.10f}"
-)
-
-print(
-    "Corr(a_m, cos(theta_m))               = "
-    f"{corr_a_cos:.10f}"
-)
-
-print("=" * 65)
-
-
-# ============================================================
-# VALIDITY CHECK FOR EQ. (30)
-# ============================================================
-
-if not (
-    0.0 <= analytical_moment < 1.0
-):
-    raise ValueError(
-        "The analytical moment obtained from Eq. (30) "
-        "must satisfy 0 <= moment < 1. "
-        f"Obtained moment = {analytical_moment}"
-    )
-
-
-# ============================================================
-# COMPUTE ANALYTICAL mu FROM EQ. (30)
-# ============================================================
-
-mu = solve_mu(
-    analytical_moment
-)
-
-print()
-print(
-    "Analytical mu from Eq. (30)           = "
-    f"{mu:.10f}"
-)
-
-print(
-    "I1(mu)/I0(mu)                         = "
-    f"{bessel_ratio(mu):.10f}"
-)
-
-print("=" * 65)
-
-
-# ============================================================
-# PHASE AXIS
-# ============================================================
-
-x = np.linspace(
-    -np.pi,
-    np.pi,
-    1000
-)
-
-
-# ============================================================
-# EXPO-COSINE / VON MISES DISTRIBUTION
-#
-# f_theta(theta)
-# =
-# exp(mu cos(theta))
-# -----------------------
-# 2 pi I0(mu)
-#
-#
-# Stable implementation:
-#
-# I0(mu) = exp(mu) I0e(mu)
-#
-# Therefore:
-#
-# exp(mu cos(theta)) / I0(mu)
-#
-# =
-#
-# exp(mu(cos(theta)-1)) / I0e(mu)
-#
-# ============================================================
+x = np.linspace(-np.pi, np.pi, 1000)
 
 expo_cosine = (
-    np.exp(
-        mu
-        * (
-            np.cos(x)
-            - 1.0
-        )
-    )
-    /
-    (
-        2.0
-        * np.pi
-        * i0e(mu)
-    )
+    np.exp(mu * (np.cos(x) - 1.0))
+    / (2.0 * np.pi * i0e(mu))
 )
 
-
-# ============================================================
-# WEIGHTED GAUSSIAN REFERENCE
-# ============================================================
-
-sigma_gaussian = np.sqrt(
-    np.sum(
-        weights_all
-        * theta_all**2
-    )
-)
-
+sigma_gaussian = np.sqrt(np.sum(weights_all * theta_all**2))
 gaussian = (
-    1.0
-    /
-    (
-        np.sqrt(2.0 * np.pi)
-        * sigma_gaussian
-    )
-    *
-    np.exp(
-        -(x**2)
-        /
-        (
-            2.0
-            * sigma_gaussian**2
-        )
-    )
+    1.0 / (np.sqrt(2.0 * np.pi) * sigma_gaussian)
+    * np.exp(-(x**2) / (2.0 * sigma_gaussian**2))
 )
 
-
-# ============================================================
-# WEIGHTED LAPLACIAN REFERENCE
-# ============================================================
-
-b_laplace = np.sum(
-    weights_all
-    * np.abs(theta_all)
-)
-
+b_laplace = np.sum(weights_all * np.abs(theta_all))
 laplacian = (
-    1.0
-    /
-    (
-        2.0
-        * b_laplace
-    )
-    *
-    np.exp(
-        -np.abs(x)
-        /
-        b_laplace
-    )
+    1.0 / (2.0 * b_laplace)
+    * np.exp(-np.abs(x) / b_laplace)
 )
 
 
 # ============================================================
-# GOODNESS-OF-FIT: INTEGRATED SQUARED ERROR
+# IEEE SINGLE-COLUMN FIGURE GENERATION (3.4 in x 3.1 in)
 # ============================================================
 
-bins = np.linspace(
-    -np.pi,
-    np.pi,
-    37
-)
+fig, ax = plt.subplots(figsize=(3.5, 2.5))
 
-hist_density, bin_edges = np.histogram(
-    theta_all,
-    bins=bins,
-    weights=weights_all,
-    density=True
-)
-
-bin_centers = (
-    bin_edges[:-1]
-    + bin_edges[1:]
-) / 2.0
-
-bin_width = (
-    bin_edges[1]
-    - bin_edges[0]
-)
-
-
-# ------------------------------------------------------------
-# Expo-Cosine at histogram bin centers
-# ------------------------------------------------------------
-
-def von_mises_pdf(theta):
-
-    return (
-        np.exp(
-            mu
-            * (
-                np.cos(theta)
-                - 1.0
-            )
-        )
-        /
-        (
-            2.0
-            * np.pi
-            * i0e(mu)
-        )
-    )
-
-
-expo_bins = von_mises_pdf(
-    bin_centers
-)
-
-
-# ------------------------------------------------------------
-# Gaussian at histogram bin centers
-# ------------------------------------------------------------
-
-gaussian_bins = (
-    1.0
-    /
-    (
-        np.sqrt(2.0 * np.pi)
-        * sigma_gaussian
-    )
-    *
-    np.exp(
-        -(bin_centers**2)
-        /
-        (
-            2.0
-            * sigma_gaussian**2
-        )
-    )
-)
-
-
-# ------------------------------------------------------------
-# Laplacian at histogram bin centers
-# ------------------------------------------------------------
-
-laplacian_bins = (
-    1.0
-    /
-    (
-        2.0
-        * b_laplace
-    )
-    *
-    np.exp(
-        -np.abs(bin_centers)
-        /
-        b_laplace
-    )
-)
-
-
-# ------------------------------------------------------------
-# Integrated squared errors
-# ------------------------------------------------------------
-
-ISE_expo = np.sum(
-    (
-        hist_density
-        - expo_bins
-    )**2
-) * bin_width
-
-ISE_gaussian = np.sum(
-    (
-        hist_density
-        - gaussian_bins
-    )**2
-) * bin_width
-
-ISE_laplacian = np.sum(
-    (
-        hist_density
-        - laplacian_bins
-    )**2
-) * bin_width
-
-
-print()
-print("=" * 65)
-print("INTEGRATED SQUARED ERROR")
-print("=" * 65)
-
-print(
-    f"Expo-Cosine                        = {ISE_expo:.10f}"
-)
-
-print(
-    f"Gaussian                           = {ISE_gaussian:.10f}"
-)
-
-print(
-    f"Laplacian                          = {ISE_laplacian:.10f}"
-)
-
-print("=" * 65)
-
-
-# ============================================================
-# FIGURE
-# ============================================================
-
-plt.figure(
-    figsize=(8.2, 5.7)
-)
-
-
-# ------------------------------------------------------------
-# Amplitude-weighted empirical histogram
-# ------------------------------------------------------------
-
-plt.hist(
+# Histogram
+ax.hist(
     theta_all,
     bins=36,
     weights=weights_all,
@@ -742,98 +207,78 @@ plt.hist(
     label="Empirical"
 )
 
-
-# ------------------------------------------------------------
-# Expo-Cosine analytical distribution
-# ------------------------------------------------------------
-
-plt.plot(
+# Von Mises (Exponential-Cosine)
+ax.plot(
     x,
     expo_cosine,
     color="green",
-    linewidth=2.5,
-    label="von Mises (Exponential-Cosine)"
+    linewidth=1.8,
+    label="von Mises"
 )
 
-
-# ------------------------------------------------------------
-# Gaussian reference
-# ------------------------------------------------------------
-
-plt.plot(
+# Gaussian Reference
+ax.plot(
     x,
     gaussian,
     color="red",
     linestyle="--",
-    linewidth=2.0,
+    linewidth=1.4,
     label="Gaussian"
 )
 
-
-# ------------------------------------------------------------
-# Laplacian reference
-# ------------------------------------------------------------
-
-plt.plot(
+# Laplacian Reference
+ax.plot(
     x,
     laplacian,
     color="magenta",
     linestyle="-.",
-    linewidth=2.0,
+    linewidth=1.4,
     label="Laplacian"
 )
 
+# Bold Axis Labels
+ax.set_xlabel(r"Relative Effective Phase $\theta_m$ (rad)", fontweight='bold')
+ax.set_ylabel(r"$f_{\theta,w}(\theta_m)$", fontweight='bold')
 
-# ============================================================
-# FIGURE FORMATTING
-# ============================================================
+ax.set_xlim(-np.pi, np.pi)
+ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5)
 
-plt.xlabel(
-    r"Relative Effective Phase $\theta_m$ (radians)",
-    fontsize=12
+# Bold Tick Labels (Axes Values)
+for tick in ax.get_xticklabels() + ax.get_yticklabels():
+    tick.set_fontweight("bold")
+
+# Bold Legend Box and Labels
+legend = ax.legend(
+    loc="upper left",
+    fontsize=8.5,
+    frameon=True,
+    fancybox=False,
+    edgecolor="black",
+    framealpha=1.0,
+    handlelength=2.2,
+    handletextpad=0.4,
+    borderpad=0.4,
 )
 
-plt.ylabel(
-    r"$f_{\theta,w}(\theta_m)$",
-    fontsize=12
-)
+legend.get_frame().set_linewidth(1.2)
+for text in legend.get_texts():
+    text.set_fontweight("bold")
 
-plt.xlim(
-    -np.pi,
-    np.pi
-)
-
-plt.grid(
-    True,
-    linestyle="--",
-    alpha=0.28
-)
-
-plt.legend(
-    loc="upper left"
-)
-
-plt.tight_layout()
+fig.tight_layout(pad=0.4)
 
 
 # ============================================================
-# SAVE FIGURE
+# SAVE RESULTS
 # ============================================================
 
-plt.savefig(
-    f"Figure_2_weighted_M{M}.png",
-    dpi=600,
-    bbox_inches="tight"
-)
+output_dir = Path.cwd() / "figure2_bold_outputs"
+output_dir.mkdir(parents=True, exist_ok=True)
 
-plt.savefig(
-    f"Figure_2_weighted_M{M}.pdf",
-    bbox_inches="tight"
-)
+pdf_path = output_dir / f"Figure_2_weighted_M{M}_IEEE_bold.pdf"
+png_path = output_dir / f"Figure_2_weighted_M{M}_IEEE_bold.png"
 
+fig.savefig(pdf_path, format="pdf", bbox_inches="tight", facecolor="white")
+fig.savefig(png_path, dpi=600, bbox_inches="tight", facecolor="white")
 
-# ============================================================
-# DISPLAY FIGURE
-# ============================================================
-
+print(f"Bold IEEE Vector PDF saved to: {pdf_path}")
 plt.show()
