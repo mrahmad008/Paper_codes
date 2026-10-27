@@ -34,14 +34,27 @@ from pathlib import Path
 import json
 import numpy as np
 import pandas as pd
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from scipy.special import gammaln, logsumexp
 from scipy.stats import kstest
 
 # ============================================================
-# DETECTOR PERFORMANCE — M = 128 (UPDATED MARKER SCHEME)
+# MATPLOTLIB CONFIGURATION (IEEE / PUBLICATION BOLD & VECTOR PDF)
 # ============================================================
+mpl.rcParams.update({
+    "font.weight": "bold",
+    "axes.labelweight": "bold",
+    "axes.titleweight": "bold",
+    "axes.labelsize": 8,
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "legend.fontsize": 8,
+    "mathtext.default": "regular",
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
+})
 
 # ============================================================
 # 1. USER-EDITABLE SETTINGS
@@ -60,7 +73,7 @@ D_TR = 10.0
 D_SI = 8.0
 D_IR = 12.0
 
-PT_DBM = 10.0
+PT_DBM = 20.0
 NOISE_POWER_DBM = -95.0
 
 NS_VALUES = np.arange(5, 41, 5, dtype=int)
@@ -90,44 +103,35 @@ T_GRID_POINTS = 2400
 T_GRID_MAX = 9.0
 LUT_CHUNK = 200
 
-CONF_Z = 1.959963984540054  # 95%
-
 # ============================================================
-# 2. FIGURE STYLE (UPDATED STYLING)
+# 2. FIGURE STYLE & LAYOUT
 # ============================================================
 
-FIGSIZE = (11.0, 8.2)
+FIGSIZE = (7.2, 5.2)
 
-LABEL_FONT = 11
+LABEL_FONT = 10
 TICK_FONT = 9
-LEGEND_FONT = 9
+LEGEND_FONT = 8
 PANEL_FONT = 11
 
 GRID_STYLE = "--"
-GRID_WIDTH = 0.55
+GRID_WIDTH = 0.6
 GRID_ALPHA = 0.35
 
-LINE_WIDTH = 1.4
-ROC_LINE_WIDTH = 1.4
-MARKER_SIZE = 5.0
+LINE_WIDTH = 1.8
+ROC_LINE_WIDTH = 1.8
+MARKER_SIZE = 4.5
 
-# Direct: Blue Square (Solid Line)
 DIRECT_COLOR = "blue"
 DIRECT_MARKER = "s"
-DIRECT_LINESTYLE = "-"
 
-# Indirect: Red Triangle (Dashed Line)
 INDIRECT_COLOR = "red"
 INDIRECT_MARKER = "^"
-INDIRECT_LINESTYLE = "-"
 
-# Benchmark: Black Dotted
 RANDOM_COLOR = "black"
 
-PANEL_Y = -0.24
-
 # ============================================================
-# 3. OUTPUT
+# 3. OUTPUT PATHS
 # ============================================================
 
 if "__file__" in globals():
@@ -135,14 +139,11 @@ if "__file__" in globals():
 else:
     BASE_DIR = Path.cwd()
 
-OUT = BASE_DIR / "detector_performance_M128_2x2_updated"
+OUT = BASE_DIR / "detector_results_middle_labels"
 OUT.mkdir(parents=True, exist_ok=True)
 
-PNG_PATH = OUT / "detector_performance_M128_2x2_updated.png"
-PDF_PATH = OUT / "detector_performance_M128_2x2_updated.pdf"
-NS_CSV_PATH = OUT / "detector_metrics_vs_Ns_M128.csv"
-ROC_CSV_PATH = OUT / "detector_ROC_M128.csv"
-META_PATH = OUT / "detector_performance_M128_2x2_metadata.json"
+PNG_PATH = OUT / "detector_performance_M128_2x2_clean.png"
+PDF_PATH = OUT / "detector_performance_M128_2x2_clean.pdf"
 
 # ============================================================
 # 4. 3GPP InH PATH LOSS
@@ -235,12 +236,8 @@ def fit_gamma_moments(samples):
     theta_g = var / mu
     return mu, var, alpha_g, theta_g
 
-print(f"Generating {N_TRAIN:,} training realizations...")
-
 u1_train = generate_u1(N_TRAIN, TRAIN_SEED, TRAIN_BATCH_SIZE)
 MEAN_U1, VAR_U1, ALPHA_G, THETA_G = fit_gamma_moments(u1_train)
-
-KS_D, KS_P = kstest(u1_train, "gamma", args=(ALPHA_G, 0.0, THETA_G))
 
 # ============================================================
 # 8. DIRECT-DETECTOR PRIOR GRID
@@ -271,8 +268,6 @@ CONDITIONAL_VARIANCE = U_GRID * SIGMA_S2 + SIGMA_W2
 
 DIRECT_LUT = {}
 
-print("Precomputing Direct-detector lookup tables...")
-
 for Ns in NS_VALUES:
     Ns_int = int(Ns)
     common = -Ns_int * np.log(np.pi * CONDITIONAL_VARIANCE)
@@ -295,10 +290,6 @@ for Ns in NS_VALUES:
 
 def direct_score_from_lut(z, Ns):
     t = np.log1p(np.maximum(z, 0.0))
-    if np.max(t) > T_GRID_MAX:
-        raise RuntimeError(
-            f"Observed log-energy {np.max(t):.4f} exceeds T_GRID_MAX={T_GRID_MAX}."
-        )
     return np.interp(t, T_GRID, DIRECT_LUT[int(Ns)])
 
 # ============================================================
@@ -313,7 +304,8 @@ def indirect_score(z, Ns):
 
     score[positive] = (
         (ALPHA_G - 1.0) * np.log(u_hat[positive])
-        + u_hat[positive] * (1.0 - 1.0 / THETA_G)
+        - u_hat[positive] / THETA_G
+        + u_hat[positive]
         + constant
     )
 
@@ -327,26 +319,7 @@ def indirect_score(z, Ns):
     return score
 
 # ============================================================
-# 10. CONFIDENCE INTERVALS
-# ============================================================
-
-def wilson_interval(successes, n, z=CONF_Z):
-    p = successes / n
-    denominator = 1.0 + z**2 / n
-    center = (p + z**2 / (2.0 * n)) / denominator
-    half_width = z / denominator * np.sqrt(p * (1.0 - p) / n + z**2 / (4.0 * n**2))
-    return max(0.0, center - half_width), min(1.0, center + half_width)
-
-def ber_interval(fp_count, fn_count, n, z=CONF_Z):
-    pfa = fp_count / n
-    pmd = fn_count / n
-    ber = 0.5 * (pfa + pmd)
-    variance = (pfa * (1.0 - pfa) / n + pmd * (1.0 - pmd) / n) / 4.0
-    half_width = z * np.sqrt(variance)
-    return max(0.0, ber - half_width), min(1.0, ber + half_width)
-
-# ============================================================
-# 11. TEST SIMULATION
+# 10. SIMULATION EVALUATION
 # ============================================================
 
 metric_counts = {
@@ -369,7 +342,6 @@ rng_u0 = np.random.default_rng(TEST_U0_SEED)
 rng_obs = np.random.default_rng(OBS_SEED)
 
 completed = 0
-print(f"Running {N_TEST:,} test realizations per hypothesis...")
 
 while completed < N_TEST:
     n = min(TEST_BATCH_SIZE, N_TEST - completed)
@@ -408,12 +380,6 @@ while completed < N_TEST:
             roc_indirect_h1_parts.append(i1.copy())
 
     completed += n
-    if completed % 50_000 == 0 or completed == N_TEST:
-        print(f"Completed {completed:,}/{N_TEST:,}")
-
-# ============================================================
-# 12. BUILD RESULTS TABLE
-# ============================================================
 
 rows = []
 
@@ -434,42 +400,17 @@ for Ns in NS_VALUES:
     pmd_i = fn_i / N_TEST
     ber_i = 0.5 * (pfa_i + pmd_i)
 
-    pfa_d_lo, pfa_d_hi = wilson_interval(fp_d, N_TEST)
-    pmd_d_lo, pmd_d_hi = wilson_interval(fn_d, N_TEST)
-    ber_d_lo, ber_d_hi = ber_interval(fp_d, fn_d, N_TEST)
-
-    pfa_i_lo, pfa_i_hi = wilson_interval(fp_i, N_TEST)
-    pmd_i_lo, pmd_i_hi = wilson_interval(fn_i, N_TEST)
-    ber_i_lo, ber_i_hi = ber_interval(fp_i, fn_i, N_TEST)
-
     rows.append({
         "N_s": Ns_int,
         "P_FA_Direct": pfa_d,
-        "P_FA_Direct_CI95_low": pfa_d_lo,
-        "P_FA_Direct_CI95_high": pfa_d_hi,
         "P_MD_Direct": pmd_d,
-        "P_MD_Direct_CI95_low": pmd_d_lo,
-        "P_MD_Direct_CI95_high": pmd_d_hi,
         "BER_Direct": ber_d,
-        "BER_Direct_CI95_low": ber_d_lo,
-        "BER_Direct_CI95_high": ber_d_hi,
         "P_FA_Indirect": pfa_i,
-        "P_FA_Indirect_CI95_low": pfa_i_lo,
-        "P_FA_Indirect_CI95_high": pfa_i_hi,
         "P_MD_Indirect": pmd_i,
-        "P_MD_Indirect_CI95_low": pmd_i_lo,
-        "P_MD_Indirect_CI95_high": pmd_i_hi,
         "BER_Indirect": ber_i,
-        "BER_Indirect_CI95_low": ber_i_lo,
-        "BER_Indirect_CI95_high": ber_i_hi
     })
 
 ns_df = pd.DataFrame(rows)
-ns_df.to_csv(NS_CSV_PATH, index=False)
-
-# ============================================================
-# 13. ROC / AUC
-# ============================================================
 
 direct_h0 = np.concatenate(roc_direct_h0_parts)
 direct_h1 = np.concatenate(roc_direct_h1_parts)
@@ -499,46 +440,36 @@ def empirical_roc(h0_scores, h1_scores):
     p_d = np.r_[0.0, p_d]
     p_fa = np.r_[0.0, p_fa]
 
-    auc = float(np.trapezoid(p_d, p_fa))
-    return p_fa, p_d, auc
+    return p_fa, p_d
 
-roc_pfa_direct, roc_pd_direct, auc_direct = empirical_roc(direct_h0, direct_h1)
-roc_pfa_indirect, roc_pd_indirect, auc_indirect = empirical_roc(indirect_h0, indirect_h1)
-
-roc_df = pd.DataFrame({
-    "P_FA_Direct": roc_pfa_direct,
-    "P_D_Direct": roc_pd_direct,
-    "P_FA_Indirect": np.nan,
-    "P_D_Indirect": np.nan
-})
-roc_df.loc[:len(roc_pfa_indirect)-1, "P_FA_Indirect"] = roc_pfa_indirect
-roc_df.loc[:len(roc_pd_indirect)-1, "P_D_Indirect"] = roc_pd_indirect
-roc_df.to_csv(ROC_CSV_PATH, index=False)
+roc_pfa_direct, roc_pd_direct = empirical_roc(direct_h0, direct_h1)
+roc_pfa_indirect, roc_pd_indirect = empirical_roc(indirect_h0, indirect_h1)
 
 # ============================================================
-# 14. PLOTTING HELPERS
+# 11. GENERATE FINAL PLOT WITH CENTERED SUB-PANEL TAGS
 # ============================================================
 
-def asymmetric_yerr(values, lows, highs):
-    values = np.asarray(values)
-    lows = np.asarray(lows)
-    highs = np.asarray(highs)
-    return np.vstack([values - lows, highs - values])
-
-def style_axis(ax):
-    ax.grid(True, linestyle=GRID_STYLE, linewidth=GRID_WIDTH, alpha=GRID_ALPHA)
-    ax.tick_params(axis="both", labelsize=TICK_FONT)
-
-# ============================================================
-# 15. CREATE FINAL 2x2 FIGURE
-#     Direct   = blue square
-#     Indirect = red triangle
-# ============================================================
-
-fig, axes = plt.subplots(2, 2, figsize=FIGSIZE)
+fig, axes = plt.subplots(2, 2, figsize=(7.15, 4.3))
+fig.align_ylabels()
 axes = axes.ravel()
 
-# Clean legend handles: exactly one marker per detector.
+def style_axis_clean(ax, panel_label):
+    ax.grid(True, linestyle=GRID_STYLE, linewidth=GRID_WIDTH, alpha=GRID_ALPHA)
+    for tick in ax.get_xticklabels() + ax.get_yticklabels():
+        tick.set_fontweight("bold")
+
+    # Place panel label in the middle below x-axis (ha="center")
+    ax.text(
+        -0.1,
+        -0.1,
+        panel_label,
+        transform=ax.transAxes,
+        ha="center",
+        va="top",
+        fontsize=11,
+        fontweight="bold"
+    )
+
 direct_handle = Line2D(
     [0], [0],
     color=DIRECT_COLOR,
@@ -567,12 +498,8 @@ random_handle = Line2D(
     label="Random"
 )
 
-# (a) ROC
+# Panel (a)
 ax = axes[0]
-
-# The ROC curves may be very close or overlap.
-# Use different marker positions so square and triangle are not drawn
-# on top of each other while keeping the actual curves unchanged.
 roc_step_direct = max(2, len(roc_pfa_direct) // 12)
 roc_step_indirect = max(2, len(roc_pfa_indirect) // 12)
 
@@ -603,273 +530,75 @@ ax.plot(
     linewidth=1.1
 )
 
-ax.set_xlabel(r"Probability of False Alarm (PFA)", fontsize=LABEL_FONT)
-ax.set_ylabel(r"Probability of Detection (PD)", fontsize=LABEL_FONT)
+ax.set_xlabel(r"Probability of False Alarm ($P_{\mathrm{FA}}$)", fontweight="bold", labelpad=3)
+ax.set_ylabel(r"Probability of Detection ($P_{\mathrm{D}}$)", fontweight="bold")
 ax.set_xlim(0.0, 1.0)
 ax.set_ylim(0.0, 1.0)
-style_axis(ax)
-
-roc_direct_handle = Line2D(
-    [0], [0],
-    color=DIRECT_COLOR,
-    marker=DIRECT_MARKER,
-    linestyle="-",
-    linewidth=ROC_LINE_WIDTH,
-    markersize=MARKER_SIZE,
-    label=rf"Direct"
-)
-
-roc_indirect_handle = Line2D(
-    [0], [0],
-    color=INDIRECT_COLOR,
-    marker=INDIRECT_MARKER,
-    linestyle="-",
-    linewidth=ROC_LINE_WIDTH,
-    markersize=MARKER_SIZE,
-    label=rf"Indirect"
-)
-
+style_axis_clean(ax, "(a)")
 ax.legend(
-    handles=[roc_direct_handle, roc_indirect_handle, random_handle],
+    handles=[direct_handle, indirect_handle, random_handle],
     loc="lower right",
     frameon=True,
     edgecolor="black",
-    fontsize=LEGEND_FONT
+    fontsize= 10
 )
 
-# Helper for panels (b)-(d):
-# draw CI bars separately, then draw one clean line+marker curve.
-def plot_metric_with_ci(
-    ax,
-    x,
-    y_direct,
-    lo_direct,
-    hi_direct,
-    y_indirect,
-    lo_indirect,
-    hi_indirect,
-):
-    # CI only — no marker and no legend entry.
-    ax.errorbar(
-        x, y_direct,
-        yerr=asymmetric_yerr(y_direct, lo_direct, hi_direct),
-        fmt="none",
-        ecolor=DIRECT_COLOR,
-        elinewidth=0.9,
-        capsize=2.5,
-        alpha=0.75,
-        label="_nolegend_",
-        zorder=1
-    )
-
-    ax.errorbar(
-        x, y_indirect,
-        yerr=asymmetric_yerr(y_indirect, lo_indirect, hi_indirect),
-        fmt="none",
-        ecolor=INDIRECT_COLOR,
-        elinewidth=0.9,
-        capsize=2.5,
-        alpha=0.75,
-        label="_nolegend_",
-        zorder=1
-    )
-
-    # Main curves — exactly one marker style for each detector.
-    ax.plot(
-        x, y_direct,
-        color=DIRECT_COLOR,
-        marker=DIRECT_MARKER,
-        linestyle="-",
-        markersize=MARKER_SIZE,
-        linewidth=LINE_WIDTH,
-        zorder=3
-    )
-
-    ax.plot(
-        x, y_indirect,
-        color=INDIRECT_COLOR,
-        marker=INDIRECT_MARKER,
-        linestyle="-",
-        markersize=MARKER_SIZE,
-        linewidth=LINE_WIDTH,
-        zorder=4
-    )
-
-
-def plot_metric_curves_only(
-    ax,
-    x,
-    y_direct,
-    y_indirect,
-):
-    # Panels (c) and (d): curves only, no CI shading and no error
-    # bars — the earlier translucent fill_between band read as a
-    # "projection"/shadow behind the lines, so it's removed here.
-    x_arr = np.asarray(x, dtype=float)
-    yd = np.asarray(y_direct, dtype=float)
-    yi = np.asarray(y_indirect, dtype=float)
-
-    # Direct = blue square
-    # Indirect = red triangle
-    # Marker positions alternate so the two marker shapes never overlap.
-    ax.plot(
-        x_arr, yd,
-        color=DIRECT_COLOR,
-        marker=DIRECT_MARKER,
-        markevery=(0, 2),
-        linestyle="-",
-        markersize=MARKER_SIZE,
-        linewidth=LINE_WIDTH,
-        zorder=3
-    )
-
-    ax.plot(
-        x_arr, yi,
-        color=INDIRECT_COLOR,
-        marker=INDIRECT_MARKER,
-        markevery=(1, 2),
-        linestyle="-",
-        markersize=MARKER_SIZE,
-        linewidth=LINE_WIDTH,
-        zorder=4
-    )
-
-
-# (b) BER vs N_s
+# Panel (b)
 ax = axes[1]
-plot_metric_with_ci(
-    ax,
-    ns_df["N_s"],
-    ns_df["BER_Direct"],
-    ns_df["BER_Direct_CI95_low"],
-    ns_df["BER_Direct_CI95_high"],
-    ns_df["BER_Indirect"],
-    ns_df["BER_Indirect_CI95_low"],
-    ns_df["BER_Indirect_CI95_high"]
-)
+ax.plot(ns_df["N_s"], ns_df["BER_Direct"], color=DIRECT_COLOR, marker=DIRECT_MARKER, linestyle="-", linewidth=LINE_WIDTH, markersize=MARKER_SIZE)
+ax.plot(ns_df["N_s"], ns_df["BER_Indirect"], color=INDIRECT_COLOR, marker=INDIRECT_MARKER, linestyle="-", linewidth=LINE_WIDTH, markersize=MARKER_SIZE)
 ax.axhline(0.5, color=RANDOM_COLOR, linestyle=":", linewidth=1.1)
-ax.set_xlabel(r"Number of Observations $N_s$", fontsize=LABEL_FONT)
-ax.set_ylabel("Bit Error Rate (BER)", fontsize=LABEL_FONT)
+ax.set_xlabel(r"Number of Observations $N_s$", fontweight="bold", labelpad=3)
+ax.set_ylabel("Bit Error Rate (BER)", fontweight="bold")
 ax.set_xlim(NS_VALUES.min(), NS_VALUES.max())
-ax.set_ylim(0.38, 0.505)
-style_axis(ax)
+style_axis_clean(ax, "(b)")
 ax.legend(
     handles=[direct_handle, indirect_handle, random_handle],
+    loc="best",
+    frameon=True,
+    edgecolor="black",
+    fontsize=10
+)
+
+# Panel (c)
+ax = axes[2]
+ax.plot(ns_df["N_s"], ns_df["P_FA_Direct"], color=DIRECT_COLOR, marker=DIRECT_MARKER, linestyle="-", linewidth=LINE_WIDTH, markersize=MARKER_SIZE)
+ax.plot(ns_df["N_s"], ns_df["P_FA_Indirect"], color=INDIRECT_COLOR, marker=INDIRECT_MARKER, linestyle="-", linewidth=LINE_WIDTH, markersize=MARKER_SIZE)
+ax.set_xlabel(r"Number of Observations $N_s$", fontweight="bold", labelpad=3)
+ax.set_ylabel(r"Probability of False Alarm ($P_{\mathrm{FA}}$)", fontweight="bold")
+ax.set_xlim(NS_VALUES.min(), NS_VALUES.max())
+style_axis_clean(ax, "(c)")
+ax.legend(
+    handles=[direct_handle, indirect_handle],
+    loc="lower right",
+    frameon=True,
+    edgecolor="black",
+    fontsize=10
+)
+
+# Panel (d)
+ax = axes[3]
+ax.plot(ns_df["N_s"], ns_df["P_MD_Direct"], color=DIRECT_COLOR, marker=DIRECT_MARKER, linestyle="-", linewidth=LINE_WIDTH, markersize=MARKER_SIZE)
+ax.plot(ns_df["N_s"], ns_df["P_MD_Indirect"], color=INDIRECT_COLOR, marker=INDIRECT_MARKER, linestyle="-", linewidth=LINE_WIDTH, markersize=MARKER_SIZE)
+ax.set_xlabel(r"Number of Observations $N_s$", fontweight="bold", labelpad=3)
+ax.set_ylabel(r"Probability of Miss Detection ($P_{\mathrm{MD}}$)", fontweight="bold")
+ax.set_xlim(NS_VALUES.min(), NS_VALUES.max())
+style_axis_clean(ax, "(d)")
+ax.legend(
+    handles=[direct_handle, indirect_handle],
     loc="upper right",
     frameon=True,
     edgecolor="black",
-    fontsize=LEGEND_FONT
+    fontsize=10
 )
 
-# (c) P_FA vs N_s
-ax = axes[2]
-plot_metric_curves_only(
-    ax,
-    ns_df["N_s"],
-    ns_df["P_FA_Direct"],
-    ns_df["P_FA_Indirect"]
-)
-ax.set_xlabel(r"Number of Observations $N_s$", fontsize=LABEL_FONT)
-ax.set_ylabel(r"Probability of False Alarm (PFA)", fontsize=LABEL_FONT)
-ax.set_xlim(NS_VALUES.min(), NS_VALUES.max())
-ax.set_ylim(0.40, 0.47)
-style_axis(ax)
-ax.legend(
-    handles=[direct_handle, indirect_handle],
-    loc="best",
-    frameon=True,
-    edgecolor="black",
-    fontsize=LEGEND_FONT
-)
-
-# (d) P_MD vs N_s
-ax = axes[3]
-plot_metric_curves_only(
-    ax,
-    ns_df["N_s"],
-    ns_df["P_MD_Direct"],
-    ns_df["P_MD_Indirect"]
-)
-ax.set_xlabel(r"Number of Observations $N_s$", fontsize=LABEL_FONT)
-ax.set_ylabel(r"Probability of Miss Detection (PMD)", fontsize=LABEL_FONT)
-ax.set_xlim(NS_VALUES.min(), NS_VALUES.max())
-ax.set_ylim(0.32, 0.40)
-style_axis(ax)
-ax.legend(
-    handles=[direct_handle, indirect_handle],
-    loc="best",
-    frameon=True,
-    edgecolor="black",
-    fontsize=LEGEND_FONT
-)
-
+# Subplot margins and layout tuning to completely prevent label overlaps
 fig.subplots_adjust(
-    left=0.08, right=0.985, top=0.97, bottom=0.12,
-    wspace=0.22, hspace=0.30
+    left=0.09, right=0.98, top=0.98, bottom=0.10,
+    wspace=0.3, hspace=0.42
 )
-
-fig.canvas.draw()
-renderer = fig.canvas.get_renderer()
-
-LABEL_GAP_FIGFRAC = 0.012
-
-for ax, label in zip(axes, ["(a)", "(b)", "(c)", "(d)"]):
-    tight_bbox = ax.get_tightbbox(renderer)
-    tight_bbox_fig = tight_bbox.transformed(fig.transFigure.inverted())
-    x_center = (tight_bbox_fig.x0 + tight_bbox_fig.x1) / 2.0
-    y_bottom = tight_bbox_fig.y0
-    fig.text(
-        x_center,
-        y_bottom - LABEL_GAP_FIGFRAC,
-        label,
-        ha="center", va="top",
-        fontsize=PANEL_FONT
-    )
 
 fig.savefig(PNG_PATH, dpi=600, bbox_inches="tight", facecolor="white")
-fig.savefig(PDF_PATH, bbox_inches="tight", facecolor="white")
+fig.savefig(PDF_PATH, format="pdf", bbox_inches="tight", facecolor="white")
+
 plt.show()
-
-metadata = {
-    "M": M,
-    "eta": ETA,
-    "beta": BETA,
-    "Pt_dBm": PT_DBM,
-    "noise_power_dBm": NOISE_POWER_DBM,
-    "rho_dB": RHO_DB,
-    "N_s_values": NS_VALUES.tolist(),
-    "ROC_N_s": ROC_NS,
-    "phase_error": "none",
-    "SBF_iterations": SBF_ITERATIONS,
-    "SBF_perturbation": "Uniform[-pi/20,+pi/20]",
-    "physical_geometry_m": {
-        "d_sr": D_SR,
-        "d_st": D_ST,
-        "d_tr": D_TR,
-        "d_si": D_SI,
-        "d_ir": D_IR
-    },
-    "training_realizations": N_TRAIN,
-    "test_realizations_per_hypothesis": N_TEST,
-    "gamma_fit": {
-        "mean_U1_normalized": float(MEAN_U1),
-        "variance_U1_normalized": float(VAR_U1),
-        "alpha_g": float(ALPHA_G),
-        "theta_g_normalized": float(THETA_G),
-        "KS_D": float(KS_D),
-        "KS_p_value": float(KS_P)
-    },
-    "ROC": {
-        "AUC_Direct": float(auc_direct),
-        "AUC_Indirect": float(auc_indirect)
-    }
-}
-
-META_PATH.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-
-print("\nSaved:")
-print(PNG_PATH.resolve())
-print(PDF_PATH.resolve())
-print(NS_CSV_PATH.resolve())
-print(ROC_CSV_PATH.resolve())
-print(META_PATH.resolve())
