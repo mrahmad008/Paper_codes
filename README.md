@@ -86,13 +86,11 @@ All simulation scripts in this repository are written in Python and rely on stan
 
 | Package / Tool | Verified Version | Purpose in Repository |
 | :--- | :---: | :--- |
-| **Python** | `3.13` | Execution runtime for simulation scripts |
-| **NumPy** | `2.1.3` | OFDM signal generation, channel modeling, IRS phase optimization, and Monte Carlo simulations |
-| **SciPy** | `1.16.3` | Numerical computations, interpolation, statistical analysis, and kNN-based information estimation |
-| **Matplotlib** | `3.10.0` | Generating MI, BDR, SBF convergence, and sensitivity analysis figures |
-| **pandas** | `2.2.3` | Organizing simulation results and exporting CSV files |
-| **scikit-learn** | `Not specified` | Mutual information estimation using `mutual_info_regression` |
-
+| **Python** | `3.13` | Execution runtime |
+| **NumPy** | `2.1.3` | Matrix operations, complex phase math, and random channel generation |
+| **SciPy** | `1.16.3` | Gamma distribution fitting (`fig3_code.py`) and numerical integration (`fig10_code.py`, `fig11_code.py`) |
+| **Matplotlib** | `3.10.0` | Generating performance curves, BER figures, and convergence plots |
+| **pandas** | `2.2.3` | Used to organize results and save in CSV files|
 
 ### Quick Installation
 
